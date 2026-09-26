@@ -140,17 +140,38 @@ OpenCode V2 currently accepts a compaction result as a summary string, not an ar
 
 ## Troubleshooting
 
-Successful server load prints:
+Successful server load prints an initialization line. For the local backend it includes the selected LM Studio endpoint and model, for example:
 
 ```text
-[fast-jev-compaction-opencode] initialized backend=typesafe
+[fast-jev-compaction-opencode] initialized backend=local endpoint=http://127.0.0.1:1234/v1 model=jev-style-qwen3.5-2b-decision-mlx preserveRecentMessages=6 minReductionRatio=25%
 ```
 
-or:
+Every OpenCode V2 compaction now logs hook entry and the classifier outcome. A local request is only necessary when there is at least one **completed tool call outside the pinned recent-message window**. With the default `preserveRecentMessages: 6`, a short session can therefore run `/compact` without contacting LM Studio; this is expected upstream fast-JEV behavior, not a failed hook.
+
+A no-request compaction is explicit in the server log:
 
 ```text
-[fast-jev-compaction-opencode] initialized backend=local
+[fast-jev-compaction-opencode] classifier not called session=... reason=no-eligible-completed-tool-calls preserveRecentMessages=6
 ```
+
+For a deterministic LM Studio smoke test, temporarily make every completed call eligible and accept any reduction:
+
+```jsonc
+{
+  "plugins": [
+    {
+      "package": "github:overbit/fast-jev-compaction-opencode",
+      "options": {
+        "backend": "local",
+        "preserveRecentMessages": 0,
+        "minReductionRatio": 0
+      }
+    }
+  ]
+}
+```
+
+Run at least one tool call to completion and then run `/compact`. The log should show `backend=local`, `candidates=1` (or more), and `jevBatches=1` (or more), while LM Studio receives the decision requests. Restore the normal preservation/reduction settings after the smoke test.
 
 If the Plugins UI reports `Invalid V2 TUI plugin module`, clear the cached package and reinstall; that error identifies an older V1 revision.
 

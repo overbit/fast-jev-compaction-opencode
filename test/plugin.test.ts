@@ -1,11 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  FastJevCompaction,
   resolveConfig,
   serializeCompaction,
   toCompactionMessages,
   type NativeMessage,
 } from '../src/plugin.js';
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe('resolveConfig', () => {
   it('selects the local backend', () => {
@@ -67,5 +70,66 @@ describe('OpenCode V2 adapter', () => {
     expect(summary).toContain('Checking.');
     expect(summary).toContain('[tool-call id=call-1 name=read]');
     expect(summary).toContain('long output');
+  });
+
+  it('calls the local backend from the V2 compaction hook when a completed tool call is eligible', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              logprobs: {
+                content: [
+                  {
+                    top_logprobs: [
+                      { token: 'A', logprob: -2 },
+                      { token: 'B', logprob: -0.1 },
+                    ],
+                  },
+                ],
+              },
+            },
+          ],
+          usage: { prompt_tokens: 20 },
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    let compactionHook: ((event: Record<string, unknown>) => Promise<void>) | undefined;
+    await FastJevCompaction.setup({
+      options: {
+        backend: 'local',
+        preserveRecentMessages: 0,
+        minReductionRatio: 0,
+      },
+      session: {
+        async hook(name: string, callback: (event: Record<string, unknown>) => Promise<void>) {
+          if (name === 'compaction') compactionHook = callback;
+          return { dispose: async () => undefined };
+        },
+      },
+    } as never);
+
+    expect(compactionHook).toBeTypeOf('function');
+
+    const event: Record<string, unknown> = {
+      sessionID: 'ses_test',
+      messages,
+    };
+    await compactionHook!(event);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(event.result).toMatchObject({
+      metadata: {
+        plugin: 'fast-jev-compaction-opencode',
+        backend: 'local',
+        calls: 1,
+        candidateCalls: 1,
+        pinned: 0,
+        jevBatches: 1,
+      },
+    });
   });
 });

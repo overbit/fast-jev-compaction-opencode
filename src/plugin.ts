@@ -1,8 +1,8 @@
 import { Plugin } from '@opencode/plugin';
 
-import { compact, reductionRatio } from './compact.js';
+import { compact, reductionRatio, resolveOptions } from './compact.js';
 import { JevClient } from './client.js';
-import { LocalJevAsker } from './local.js';
+import { LOCAL_BASE_URL, LOCAL_MODEL, LocalJevAsker } from './local.js';
 import type { CompactOptions, CompactResult, JevAsker, Message } from './types.js';
 
 type Backend = 'typesafe' | 'local';
@@ -251,17 +251,30 @@ function createAsker(config: FastJevConfig): JevAsker {
   });
 }
 
-export async function compactOpenCodeMessages(
+export async function runOpenCodeCompaction(
   messages: readonly NativeMessage[],
   asker: JevAsker,
   config: FastJevConfig,
 ): Promise<CompactResult | undefined> {
   const transcript = toCompactionMessages(messages);
   if (transcript.length === 0) return;
+  return compact(transcript, asker, config);
+}
 
-  const result = await compact(transcript, asker, config);
-  if (reductionRatio(result) < config.minReductionRatio) return;
+export async function compactOpenCodeMessages(
+  messages: readonly NativeMessage[],
+  asker: JevAsker,
+  config: FastJevConfig,
+): Promise<CompactResult | undefined> {
+  const result = await runOpenCodeCompaction(messages, asker, config);
+  if (!result || reductionRatio(result) < config.minReductionRatio) return;
   return result;
+}
+
+const LOG_PREFIX = '[fast-jev-compaction-opencode]';
+
+function percent(value: number): string {
+  return Math.round(value * 100) + '%';
 }
 
 export const FastJevCompaction = Plugin.define({
@@ -269,18 +282,94 @@ export const FastJevCompaction = Plugin.define({
 
   async setup(ctx) {
     const config = resolveConfig(ctx.options as PluginOptions);
+    const resolved = resolveOptions(config);
     const asker = createAsker(config);
+    const backendDetails =
+      config.backend === 'local'
+        ? ' endpoint=' + (config.localBaseUrl ?? LOCAL_BASE_URL) + ' model=' + (config.localModel ?? LOCAL_MODEL)
+        : '';
 
-    console.info('[fast-jev-compaction-opencode] initialized backend=' + config.backend);
+    console.info(
+      LOG_PREFIX +
+        ' initialized backend=' +
+        config.backend +
+        backendDetails +
+        ' preserveRecentMessages=' +
+        resolved.preserveRecentMessages +
+        ' minReductionRatio=' +
+        percent(config.minReductionRatio),
+    );
 
     await ctx.session.hook('compaction', async (event) => {
+      const sessionID = event.sessionID;
+      console.info(
+        LOG_PREFIX +
+          ' compaction hook session=' +
+          sessionID +
+          ' messages=' +
+          event.messages.length +
+          ' backend=' +
+          config.backend,
+      );
+
       try {
-        const result = await compactOpenCodeMessages(
+        const result = await runOpenCodeCompaction(
           event.messages as unknown as NativeMessage[],
           asker,
           config,
         );
-        if (!result) return;
+        if (!result) {
+          console.info(
+            LOG_PREFIX +
+              ' fallback session=' +
+              sessionID +
+              ' reason=no-adaptable-messages',
+          );
+          return;
+        }
+
+        const ratio = reductionRatio(result);
+        const candidateCalls = Math.max(0, result.stats.calls - result.stats.pinned);
+        console.info(
+          LOG_PREFIX +
+            ' classified session=' +
+            sessionID +
+            ' calls=' +
+            result.stats.calls +
+            ' candidates=' +
+            candidateCalls +
+            ' pinned=' +
+            result.stats.pinned +
+            ' jevBatches=' +
+            result.stats.requests +
+            ' reduction=' +
+            percent(ratio),
+        );
+
+        if (result.stats.requests === 0) {
+          console.info(
+            LOG_PREFIX +
+              ' classifier not called session=' +
+              sessionID +
+              ' reason=no-eligible-completed-tool-calls' +
+              ' preserveRecentMessages=' +
+              resolved.preserveRecentMessages,
+          );
+        }
+
+        if (ratio < config.minReductionRatio) {
+          console.info(
+            LOG_PREFIX +
+              ' fallback session=' +
+              sessionID +
+              ' reason=below-minimum-reduction' +
+              ' reduction=' +
+              percent(ratio) +
+              ' minimum=' +
+              percent(config.minReductionRatio),
+          );
+          return;
+        }
 
         event.result = {
           summary: serializeCompaction(result.messages),
@@ -288,15 +377,28 @@ export const FastJevCompaction = Plugin.define({
             plugin: 'fast-jev-compaction-opencode',
             backend: config.backend,
             calls: result.stats.calls,
+            candidateCalls,
+            pinned: result.stats.pinned,
+            jevBatches: result.stats.requests,
             kept: result.stats.kept,
             resultsDropped: result.stats.resultsDropped,
             callsDropped: result.stats.callsDropped,
-            reductionRatio: reductionRatio(result),
+            reductionRatio: ratio,
           },
         };
+
+        console.info(
+          LOG_PREFIX +
+            ' override applied session=' +
+            sessionID +
+            ' backend=' +
+            config.backend +
+            ' reduction=' +
+            percent(ratio),
+        );
       } catch (error) {
         console.warn(
-          '[fast-jev-compaction-opencode] falling back to OpenCode compaction:',
+          LOG_PREFIX + ' falling back to OpenCode compaction session=' + sessionID + ':',
           error instanceof Error ? error.message : String(error),
         );
       }
