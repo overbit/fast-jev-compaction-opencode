@@ -8,30 +8,32 @@ Instead of summarizing tool history, the plugin asks a decision model whether ea
 
 ## Install
 
-Add the plugin directly to `opencode.json`. No wrapper plugin file and no `.opencode/package.json` are required.
+Use OpenCode's native plugin installer:
+
+```sh
+opencode plugin github:overbit/fast-jev-compaction-opencode
+```
+
+The package exposes both OpenCode targets:
+
+- `./server` — runs JEV compaction.
+- `./tui` — makes the plugin visible in OpenCode's **Plugins** dialog.
+
+OpenCode automatically updates both `opencode.json` and `tui.json`.
 
 ### TypeSafe JEV
 
-Set the API key:
+Set the API key before starting OpenCode:
 
 ```sh
 export TYPESAFE_API_KEY=...
 ```
 
-Then add:
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugin": ["github:overbit/fast-jev-compaction-opencode"]
-}
-```
-
-That is the complete TypeSafe installation.
+TypeSafe is the default backend; no additional plugin configuration is required.
 
 ### Local / LM Studio
 
-With LM Studio listening on its default OpenAI-compatible URL and the default JEV-style model loaded:
+After installation, configure the server target in `opencode.json`:
 
 ```json
 {
@@ -56,33 +58,25 @@ The local defaults are:
 
 The reference local model is `chaoliangUNSW/Jev-Style-Qwen3.5-2B-Decision-MLX-bf16`.
 
-To override the endpoint or model:
+### If you already tried an older revision
 
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugin": [
-    [
-      "github:overbit/fast-jev-compaction-opencode",
-      {
-        "backend": "local",
-        "localBaseUrl": "http://127.0.0.1:1234/v1",
-        "localModel": "my-jev-model"
-      }
-    ]
-  ]
-}
-```
-
-## Updating from the earlier broken GitHub install
-
-OpenCode caches GitHub plugins. If you tried this plugin before the scriptless-package fix, remove only this plugin's cached install once:
+OpenCode caches GitHub plugin installs. Remove only this plugin's cache once:
 
 ```sh
 rm -rf "${XDG_CACHE_HOME:-$HOME/.cache}/opencode/packages/github:overbit/fast-jev-compaction-opencode"
 ```
 
-Restart OpenCode afterwards. On successful load the plugin writes an OpenCode log entry:
+Then run the installer again:
+
+```sh
+opencode plugin github:overbit/fast-jev-compaction-opencode
+```
+
+Restart OpenCode. The plugin should now appear in the **Plugins** dialog because the installer adds its TUI companion to `tui.json`.
+
+The TUI entry shows installation/activation of the companion. Actual compaction runs in the server target configured through `opencode.json`.
+
+On successful server initialization OpenCode also writes:
 
 ```text
 service=fast-jev-compaction-opencode message="Plugin initialized"
@@ -90,7 +84,7 @@ service=fast-jev-compaction-opencode message="Plugin initialized"
 
 OpenCode logs are under `${XDG_DATA_HOME:-$HOME/.local/share}/opencode/log`.
 
-Because this repository is private, the machine running OpenCode must also have GitHub credentials that can fetch `overbit/fast-jev-compaction-opencode`.
+Because this repository is private, the machine running OpenCode must have GitHub credentials that can fetch `overbit/fast-jev-compaction-opencode`.
 
 ## Configuration
 
