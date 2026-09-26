@@ -23,4 +23,4 @@ jobs:
           tarball=$(npm pack --ignore-scripts --silent)
           mkdir -p /tmp/fast-jev-package
           tar -xzf "$tarball" -C /tmp/fast-jev-package
-          bun -e 'const server = await import("/tmp/fast-jev-package/package/src/server.ts"); const tui = await import("/tmp/fast-jev-package/package/src/tui.ts"); if (typeof server.default?.server !== "function" || typeof tui.default?.tui !== "function") process.exit(1)'
+          bun -e 'const server = await import("/tmp/fast-jev-package/package/src/server.ts"); const tui = await import("/tmp/fast-jev-package/package/src/tui.ts"); if (typeof server.default?.setup !== "function" || typeof tui.default?.setup !== "function") process.exit(1)'
