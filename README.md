@@ -58,6 +58,12 @@ The local defaults are:
 
 The reference local model is `chaoliangUNSW/Jev-Style-Qwen3.5-2B-Decision-MLX-bf16`.
 
+### OpenCode git-install compatibility
+
+OpenCode currently prepares git dependencies through its npm/arborist path. Git plugin packages that declare `build`, `prepare`, `preinstall`, `install`, `postinstall`, `prepack`, or `workspaces` can fail with `NpmInstallFailedError` before the plugin loads.
+
+This package intentionally avoids those manifest fields and ships loadable source entrypoints directly.
+
 ### If you already tried an older revision
 
 OpenCode caches GitHub plugin installs. Remove only this plugin's cache once:
@@ -135,7 +141,7 @@ The pruning algorithm is inherited from the upstream implementation:
 npm install
 npm run typecheck
 npm test
-npm run build
+npm run compile
 ```
 
 The tests do not contact TypeSafe or LM Studio.
