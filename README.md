@@ -74,6 +74,24 @@ To override the endpoint or model:
 }
 ```
 
+## Updating from the earlier broken GitHub install
+
+OpenCode caches GitHub plugins. If you tried this plugin before the scriptless-package fix, remove only this plugin's cached install once:
+
+```sh
+rm -rf "${XDG_CACHE_HOME:-$HOME/.cache}/opencode/packages/github:overbit/fast-jev-compaction-opencode"
+```
+
+Restart OpenCode afterwards. On successful load the plugin writes an OpenCode log entry:
+
+```text
+service=fast-jev-compaction-opencode message="Plugin initialized"
+```
+
+OpenCode logs are under `${XDG_DATA_HOME:-$HOME/.local/share}/opencode/log`.
+
+Because this repository is private, the machine running OpenCode must also have GitHub credentials that can fetch `overbit/fast-jev-compaction-opencode`.
+
 ## Configuration
 
 | Option | Default | Description |
