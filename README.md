@@ -1,96 +1,123 @@
 # fast-jev-compaction-opencode
 
-Verbatim JEV-guided context pruning for OpenCode 2.x.
+Fast JEV compaction for OpenCode V2.
 
-This is an OpenCode port of [tamaratran/fast-jev-compaction](https://github.com/tamaratran/fast-jev-compaction), with the OpenAI-compatible local classifier approach from [lkntfnd/fast-jev-compaction-local](https://github.com/lkntfnd/fast-jev-compaction-local).
+This ports [tamaratran/fast-jev-compaction](https://github.com/tamaratran/fast-jev-compaction) to the OpenCode V2 plugin API and keeps the OpenAI-compatible local backend approach from [lkntfnd/fast-jev-compaction-local](https://github.com/lkntfnd/fast-jev-compaction-local).
 
-Instead of summarizing tool history, the plugin asks a decision model whether each completed tool call and its full result still matter. User and assistant text is kept verbatim. A tool result may be kept, truncated, or removed together with its call.
+Instead of asking a model to rewrite old context, the plugin asks JEV which completed tool calls/results are still needed. Retained user/assistant text and retained tool output are carried into the checkpoint without a model-generated summary.
 
 ## Install
 
-Use OpenCode's native plugin installer:
+Install the package with OpenCode V2:
 
 ```sh
-opencode plugin github:overbit/fast-jev-compaction-opencode
+opencode plugin add github:overbit/fast-jev-compaction-opencode
 ```
 
-The package exposes both OpenCode targets:
+The package exposes:
 
-- `./server` — runs JEV compaction.
-- `./tui` — makes the plugin visible in OpenCode's **Plugins** dialog.
+- the server plugin at the package root / `./server`;
+- the CLI companion at `./tui`, so it appears in OpenCode's Plugins UI.
 
-OpenCode automatically updates both `opencode.json` and `tui.json`.
+Because the repository is private, Git on the machine running OpenCode must already have credentials that can read `overbit/fast-jev-compaction-opencode`.
 
 ### TypeSafe JEV
 
-Set the API key before starting OpenCode:
+TypeSafe is the default backend:
 
 ```sh
 export TYPESAFE_API_KEY=...
 ```
 
-TypeSafe is the default backend; no additional plugin configuration is required.
+No plugin options are required.
 
 ### Local / LM Studio
 
-After installation, configure the server target in `opencode.json`:
+OpenCode V2 uses the `plugins` config key and object-form options:
 
-```json
+```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": [
-    [
-      "github:overbit/fast-jev-compaction-opencode",
-      {
+  "plugins": [
+    {
+      "package": "github:overbit/fast-jev-compaction-opencode",
+      "options": {
         "backend": "local"
       }
-    ]
+    }
   ]
 }
 ```
 
-The local defaults are:
+Defaults:
 
-- URL: `http://127.0.0.1:1234/v1`
+- endpoint: `http://127.0.0.1:1234/v1`
 - model: `jev-style-qwen3.5-2b-decision-mlx`
 - concurrency: `2`
-- context window: `64000`
+- local context ceiling: `64000`
 
-The reference local model is `chaoliangUNSW/Jev-Style-Qwen3.5-2B-Decision-MLX-bf16`.
+Override the endpoint/model when needed:
 
-### OpenCode git-install compatibility
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": [
+    {
+      "package": "github:overbit/fast-jev-compaction-opencode",
+      "options": {
+        "backend": "local",
+        "localBaseUrl": "http://127.0.0.1:1234/v1",
+        "localModel": "my-jev-model"
+      }
+    }
+  ]
+}
+```
 
-OpenCode currently prepares git dependencies through its npm/arborist path. Git plugin packages that declare `build`, `prepare`, `preinstall`, `install`, `postinstall`, `prepack`, or `workspaces` can fail with `NpmInstallFailedError` before the plugin loads.
+## Updating from the earlier V1 build
 
-This package intentionally avoids those manifest fields and ships loadable source entrypoints directly.
+Earlier revisions of this repository used the OpenCode V1 package `@opencode-ai/plugin`. OpenCode 2 rejects that module shape.
 
-### If you already tried an older revision
-
-OpenCode caches GitHub plugin installs. Remove only this plugin's cache once:
+Remove the cached git package once:
 
 ```sh
 rm -rf "${XDG_CACHE_HOME:-$HOME/.cache}/opencode/packages/github:overbit/fast-jev-compaction-opencode"
 ```
 
-Then run the installer again:
+Then reinstall:
 
 ```sh
-opencode plugin github:overbit/fast-jev-compaction-opencode
+opencode plugin add github:overbit/fast-jev-compaction-opencode
 ```
 
-Restart OpenCode. The plugin should now appear in the **Plugins** dialog because the installer adds its TUI companion to `tui.json`.
+If the package is already configured, run the appropriate OpenCode V2 update/re-add command after clearing the cache, then restart the OpenCode service/TUI.
 
-The TUI entry shows installation/activation of the companion. Actual compaction runs in the server target configured through `opencode.json`.
+## How the V2 integration works
 
-On successful server initialization OpenCode also writes:
+The server entrypoint is a real OpenCode V2 definition:
 
-```text
-service=fast-jev-compaction-opencode message="Plugin initialized"
+```ts
+Plugin.define({
+  id: "fast-jev-compaction-opencode",
+  async setup(ctx) {
+    await ctx.session.hook("compaction", async (event) => {
+      // classify old tool calls/results with JEV
+      // set event.result.summary on a useful reduction
+    })
+  }
+})
 ```
 
-OpenCode logs are under `${XDG_DATA_HOME:-$HOME/.local/share}/opencode/log`.
+On a compaction request:
 
-Because this repository is private, the machine running OpenCode must have GitHub credentials that can fetch `overbit/fast-jev-compaction-opencode`.
+1. OpenCode supplies the transcript through the V2 `compaction` session hook.
+2. The transcript is adapted to the upstream fast-JEV core.
+3. JEV classifies completed tool calls/results.
+4. Calls/results are kept, result-truncated, or removed using the upstream policy.
+5. When the reduction reaches `minReductionRatio`, the plugin sets `event.result.summary` itself, so OpenCode skips its normal summary-model call.
+6. If JEV fails or the reduction is too small, the hook leaves `event.result` unset and OpenCode performs its normal compaction.
+
+OpenCode V2 currently accepts a compaction result as a summary string, not an arbitrary replacement message list. The plugin therefore serializes the retained transcript deterministically into the checkpoint rather than asking another model to summarize it.
 
 ## Configuration
 
@@ -99,41 +126,35 @@ Because this repository is private, the machine running OpenCode must have GitHu
 | `backend` | `typesafe` | `typesafe` or `local` |
 | `apiKey` | `TYPESAFE_API_KEY` | TypeSafe API key |
 | `model` | `jev-latest` | TypeSafe JEV model |
-| `baseUrl` | TypeSafe System One | Remote endpoint |
+| `baseUrl` | TypeSafe System One | Remote TypeSafe endpoint |
 | `localBaseUrl` | `http://127.0.0.1:1234/v1` | OpenAI-compatible local endpoint |
 | `localModel` | `jev-style-qwen3.5-2b-decision-mlx` | Local model id |
 | `localConcurrency` | `2` | Parallel local decisions |
 | `localContextTokens` | `64000` | Local decision prompt ceiling |
-| `keepThreshold` | `0.5` | Minimum probability to keep call/result |
-| `preserveRecentMessages` | `6` | Newest messages never pruned |
+| `keepThreshold` | `0.5` | Minimum probability to keep a call/result |
+| `preserveRecentMessages` | `6` | Newest adapted messages never pruned |
 | `maxStateTokens` | `25000` | JEV state ceiling |
 | `maxRequestTokens` | `30000` | Remote request ceiling |
 | `truncateHeadChars` | `300` | Head retained when only a result is dropped |
-| `minReductionRatio` | `0.25` | Ignore low-value pruning passes |
-| `disableBuiltinAutoCompaction` | `false` | Disable OpenCode's automatic summarizing compaction |
+| `minReductionRatio` | `0.25` | Fall back to normal OpenCode compaction below this reduction |
 
-## OpenCode 2.x integration
+## Troubleshooting
 
-The plugin exposes a dedicated OpenCode `./server` package entrypoint, so OpenCode can install and load the GitHub package directly from the `plugin` field.
+Successful server load prints:
 
-The current OpenCode host plugin API exposes `experimental.chat.messages.transform`, which is used here to prune completed tool history before model calls.
+```text
+[fast-jev-compaction-opencode] initialized backend=typesafe
+```
 
-The separate `@opencode-ai/plugin/v2/promise` extension surface currently does not expose session/message compaction hooks, so this project targets the supported OpenCode 2.x host plugin API.
+or:
 
-By default, OpenCode's built-in automatic compaction remains enabled as a safety fallback. After verifying the JEV backend in your environment, set `disableBuiltinAutoCompaction: true` if you want this plugin to be the only automatic context-pruning mechanism.
+```text
+[fast-jev-compaction-opencode] initialized backend=local
+```
 
-If TypeSafe JEV or the local server fails, the transform leaves the message history unchanged.
+If the Plugins UI reports `Invalid V2 TUI plugin module`, clear the cached package and reinstall; that error identifies an older V1 revision.
 
-## Behavior
-
-The pruning algorithm is inherited from the upstream implementation:
-
-1. Pair completed tool calls with their results.
-2. Keep the first and newest configured messages pinned.
-3. Build a fitted state containing the conversation with tool results omitted.
-4. Ask whether each call still matters and whether its full result must remain verbatim.
-5. Keep the result, truncate only the result, or remove the call and result.
-6. Preserve ordinary user and assistant text unchanged.
+If installation fails with `NpmInstallFailedError`, verify GitHub access first. The package intentionally contains no npm/git preparation lifecycle scripts because OpenCode's git installer can fail on those before plugin loading.
 
 ## Development
 
@@ -144,7 +165,7 @@ npm test
 npm run compile
 ```
 
-The tests do not contact TypeSafe or LM Studio.
+Tests do not contact TypeSafe or LM Studio.
 
 ## License and attribution
 
