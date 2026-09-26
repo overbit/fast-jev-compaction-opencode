@@ -1,108 +1,100 @@
 # fast-jev-compaction-opencode
 
-OpenCode v2 port of [tamaratran/fast-jev-compaction](https://github.com/tamaratran/fast-jev-compaction).
+Verbatim JEV-guided context pruning for OpenCode 2.x.
 
-Instead of asking the session model to rewrite old context into a summary, this plugin asks a fast classifier which tool calls and tool results still matter. Retained user/assistant text and retained tool output are copied into the OpenCode compaction checkpoint rather than paraphrased.
+This is an OpenCode port of [tamaratran/fast-jev-compaction](https://github.com/tamaratran/fast-jev-compaction), with the OpenAI-compatible local classifier approach from [lkntfnd/fast-jev-compaction-local](https://github.com/lkntfnd/fast-jev-compaction-local).
+
+Instead of summarizing tool history, the plugin asks a decision model whether each completed tool call and its full result still matter. User and assistant text is kept verbatim. A tool result may be kept, truncated, or removed together with its call.
 
 ## Backends
 
-- **TypeSafe Jev** — System One API, compatible with the original plugin.
-- **Local** — an OpenAI-compatible `/chat/completions` endpoint with token logprobs, such as LM Studio. This follows the approach in [lkntfnd/fast-jev-compaction-local](https://github.com/lkntfnd/fast-jev-compaction-local).
+### TypeSafe JEV
 
-The local default model name is `jev-style-qwen3.5-2b-decision-mlx`; override it with the `model` option to match the model identifier exposed by your server.
+Default backend. Set `TYPESAFE_API_KEY` in the environment, or pass `apiKey`.
 
-## Install
+```ts
+import { FastJevCompaction } from "fast-jev-compaction-opencode"
 
-From GitHub while the package is not published:
+export const FastJev = (ctx: Parameters<typeof FastJevCompaction>[0]) =>
+  FastJevCompaction(ctx, {
+    backend: "typesafe",
+    model: "jev-latest"
+  })
+```
 
-```jsonc
+### Local / LM Studio
+
+Uses an OpenAI-compatible `/v1/chat/completions` endpoint and reads option probabilities from `top_logprobs`.
+
+```ts
+import { FastJevCompaction } from "fast-jev-compaction-opencode"
+
+export const FastJev = (ctx: Parameters<typeof FastJevCompaction>[0]) =>
+  FastJevCompaction(ctx, {
+    backend: "local",
+    localBaseUrl: "http://127.0.0.1:1234/v1",
+    localModel: "jev-style-qwen3.5-2b-decision-mlx",
+    localConcurrency: 2,
+    localContextTokens: 64000
+  })
+```
+
+The local backend is compatible with LM Studio and other OpenAI-compatible servers that return token log probabilities. The reference local model is `chaoliangUNSW/Jev-Style-Qwen3.5-2B-Decision-MLX-bf16`.
+
+## Install from GitHub
+
+OpenCode can load TypeScript plugins from `.opencode/plugins/`. Add this package as a config-directory dependency:
+
+```json
 {
-  "plugins": [
-    {
-      "package": "github:overbit/fast-jev-compaction-opencode",
-      "options": {
-        "backend": "typesafe"
-      }
-    }
-  ]
+  "dependencies": {
+    "fast-jev-compaction-opencode": "github:overbit/fast-jev-compaction-opencode"
+  }
 }
 ```
 
-For a local checkout:
+Save that as `.opencode/package.json`, then create `.opencode/plugins/fast-jev.ts` using one of the examples above. OpenCode installs config-directory dependencies with Bun at startup.
 
-```jsonc
-{
-  "plugins": [
-    {
-      "package": "/absolute/path/to/fast-jev-compaction-opencode",
-      "options": {
-        "backend": "local",
-        "baseUrl": "http://127.0.0.1:1234/v1",
-        "model": "jev-style-qwen3.5-2b-decision-mlx"
-      }
-    }
-  ]
-}
-```
-
-## TypeSafe configuration
-
-Set the key in the environment that launches OpenCode:
-
-```sh
-export TYPESAFE_API_KEY=...
-```
-
-Or pass `apiKey` as a plugin option.
-
-## LM Studio / local configuration
-
-Load a Jev-style decision model in LM Studio with an OpenAI-compatible server and logprobs enabled.
-
-```jsonc
-{
-  "plugins": [
-    {
-      "package": "github:overbit/fast-jev-compaction-opencode",
-      "options": {
-        "backend": "local",
-        "baseUrl": "http://127.0.0.1:1234/v1",
-        "model": "jev-style-qwen3.5-2b-decision-mlx",
-        "concurrency": 2,
-        "contextTokens": 64000
-      }
-    }
-  ]
-}
-```
-
-For every Jev `noul` question, the local backend sends one prompt with choices `A. yes` / `B. no`, requests `top_logprobs`, and converts the A/B token log probabilities into the keep probability.
-
-## Options
+## Configuration
 
 | Option | Default | Description |
 | --- | --- | --- |
 | `backend` | `typesafe` | `typesafe` or `local` |
 | `apiKey` | `TYPESAFE_API_KEY` | TypeSafe API key |
-| `baseUrl` | backend-specific | TypeSafe endpoint or OpenAI-compatible base URL |
-| `model` | backend-specific | Classifier model ID |
-| `concurrency` | `2` | Local decisions in flight |
-| `contextTokens` | `64000` | Local prompt token ceiling |
+| `model` | `jev-latest` | TypeSafe JEV model |
+| `baseUrl` | TypeSafe System One | Remote endpoint |
+| `localBaseUrl` | `http://127.0.0.1:1234/v1` | OpenAI-compatible local endpoint |
+| `localModel` | `jev-style-qwen3.5-2b-decision-mlx` | Local model id |
+| `localConcurrency` | `2` | Parallel local decisions |
+| `localContextTokens` | `64000` | Local decision prompt ceiling |
 | `keepThreshold` | `0.5` | Minimum probability to keep call/result |
-| `preserveRecentMessages` | `0` | Messages inside the compaction input that are pinned; OpenCode keeps its recent tail separately |
-| `maxStateTokens` | `25000` | Estimated classifier-state ceiling |
-| `maxRequestTokens` | `30000` | Estimated TypeSafe request ceiling |
-| `truncateHeadChars` | `300` | Characters kept when only a result is dropped |
-| `minReductionRatio` | `0.25` | Below this saving, fall back to normal OpenCode compaction |
-| `goal` | last 3 user prompts | Explicit task description sent to the classifier |
+| `preserveRecentMessages` | `6` | Newest messages never pruned |
+| `maxStateTokens` | `25000` | JEV state ceiling |
+| `maxRequestTokens` | `30000` | Remote request ceiling |
+| `truncateHeadChars` | `300` | Head retained when only a result is dropped |
+| `minReductionRatio` | `0.25` | Ignore low-value pruning passes |
+| `disableBuiltinAutoCompaction` | `false` | Disable OpenCode's automatic summarizing compaction |
 
-## How it integrates with OpenCode v2
+## OpenCode 2.x integration
 
-OpenCode v2 exposes a `session.hook("compaction")` hook. The hook receives the transcript OpenCode intends to replace. This plugin maps that transcript into the fast-JEV message shape, scores completed tool calls/results, drops stale calls or truncates stale results, and writes the selected transcript to `event.result.summary`. Setting `event.result` skips the normal compaction model call.
+The current OpenCode host plugin API exposes `experimental.chat.messages.transform`, which is used here to prune completed tool history before model calls.
 
-If the classifier is unavailable, malformed, or produces less than `minReductionRatio`, the plugin leaves `event.result` unset so OpenCode performs its normal compaction.
+The separate `@opencode-ai/plugin/v2/promise` extension surface currently does not expose session/message compaction hooks, so this project intentionally targets the OpenCode 2.x host plugin API rather than relying on a nonexistent v2 compaction hook.
 
-The checkpoint adds structural tags around messages and tool calls, but retained text and tool-result bodies are not rewritten.
+By default, OpenCode's built-in automatic compaction remains enabled as a safety fallback. After verifying the JEV backend in your environment, set `disableBuiltinAutoCompaction: true` if you want this plugin to be the only automatic context-pruning mechanism. Manual OpenCode compaction remains OpenCode-controlled.
+
+If TypeSafe JEV or the local server fails, the transform leaves the message history unchanged.
+
+## Behavior
+
+The pruning algorithm is inherited from the upstream implementation:
+
+1. Pair completed tool calls with their results.
+2. Keep the first and newest configured messages pinned.
+3. Build a fitted state containing the conversation with tool results omitted.
+4. Ask whether each call still matters and whether its full result must remain verbatim.
+5. Keep the result, truncate only the result, or remove the call and result.
+6. Preserve ordinary user and assistant text unchanged.
 
 ## Development
 
@@ -110,15 +102,10 @@ The checkpoint adds structural tags around messages and tool calls, but retained
 npm install
 npm run typecheck
 npm test
-npm run build
 ```
 
-CI runs all three checks on pushes and pull requests.
+The tests do not contact TypeSafe or LM Studio.
 
-## Attribution
+## License and attribution
 
-The pruning design is derived from `tamaratran/fast-jev-compaction`. The local OpenAI-compatible logprob approach is derived from `lkntfnd/fast-jev-compaction-local`. Both reference projects are MIT licensed; see `NOTICE`.
-
-## License
-
-MIT.
+MIT. See `NOTICE` for upstream attribution.
