@@ -44,7 +44,7 @@ const DEFAULTS = {
   localConcurrency: 2,
   localContextTokens: 64_000,
   minReductionRatio: 0.25,
-  disableBuiltinAutoCompaction: true,
+  disableBuiltinAutoCompaction: false,
 };
 
 function stringOption(options: PluginOptions, key: string): string | undefined {
@@ -237,9 +237,13 @@ export const FastJevCompaction: Plugin = async (_input, options = {}) => {
       const transcript = toCompactionMessages(source);
       if (transcript.length === 0) return;
 
-      const result = await compact(transcript, asker, config);
-      if (reductionRatio(result) < config.minReductionRatio) return;
-      output.messages = applyCompaction(source, result) as typeof output.messages;
+      try {
+        const result = await compact(transcript, asker, config);
+        if (reductionRatio(result) < config.minReductionRatio) return;
+        output.messages = applyCompaction(source, result) as typeof output.messages;
+      } catch {
+        // Preserve OpenCode's normal path when the configured classifier is unavailable.
+      }
     },
   };
 };
