@@ -62,7 +62,17 @@ function parseLogprobs(body: any): number {
   const probs = new Map<string, number>()
   for (const item of top) {
     if (typeof item?.token !== "string" || typeof item?.logprob !== "number") continue
-    probs.set(item.token.trim(), item.logprob)
+    const key = item.token.trim()
+    const seen = probs.get(key)
+    probs.set(
+      key,
+      seen === undefined
+        ? item.logprob
+        : Math.max(seen, item.logprob) + Math.log1p(Math.exp(-Math.abs(seen - item.logprob))),
+    )
+  }
+  if (probs.size === 0 || (!probs.has("A") && !probs.has("B"))) {
+    throw new Error("local classifier returned no A/B decision candidates")
   }
   const floor = Math.min(...probs.values()) - 5
   const logits = [probs.get("A") ?? floor, probs.get("B") ?? floor]
