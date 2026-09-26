@@ -1,9 +1,9 @@
-import type { TuiPluginModule } from '@opencode-ai/plugin/tui';
+import { Plugin } from '@opencode/plugin/tui';
 
-export default {
+export default Plugin.define({
   id: 'fast-jev-compaction-opencode',
-  tui: async () => {
-    // Presence in the TUI registry makes the installed compaction plugin visible
-    // in OpenCode's Plugins dialog. Compaction itself runs in the server target.
+  setup() {
+    // The server plugin performs compaction. This companion makes the package
+    // visible in OpenCode's Plugins UI and follows the V2 CLI plugin contract.
   },
-} satisfies TuiPluginModule & { id: string };
+});
