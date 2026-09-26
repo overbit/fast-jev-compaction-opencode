@@ -4,16 +4,22 @@
   "description": "Verbatim Jev-guided compaction for OpenCode v2 with TypeSafe and local OpenAI-compatible backends.",
   "type": "module",
   "license": "MIT",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    }
   },
   "files": [
-    "src",
+    "dist/src",
     "README.md",
     "LICENSE",
     "NOTICE"
   ],
   "scripts": {
+    "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
