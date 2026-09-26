@@ -27,10 +27,9 @@
     "NOTICE"
   ],
   "scripts": {
-    "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "prepare": "npm run build"
+    "compile": "tsc"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
