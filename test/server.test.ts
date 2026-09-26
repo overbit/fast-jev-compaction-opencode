@@ -21,10 +21,25 @@ describe('OpenCode package entrypoints', () => {
     const pkg = JSON.parse(readFileSync(resolve('package.json'), 'utf8')) as {
       files?: string[];
       exports?: Record<string, { import?: string }>;
+      scripts?: Record<string, string>;
+      workspaces?: unknown;
     };
 
     expect(pkg.files).toContain('src');
     expect(pkg.exports?.['./server']?.import).toBe('./src/server.ts');
     expect(pkg.exports?.['./tui']?.import).toBe('./src/tui.ts');
+
+    const gitPreparationTriggers = [
+      'build',
+      'prepare',
+      'preinstall',
+      'install',
+      'postinstall',
+      'prepack',
+    ];
+    for (const name of gitPreparationTriggers) {
+      expect(pkg.scripts?.[name]).toBeUndefined();
+    }
+    expect(pkg.workspaces).toBeUndefined();
   });
 });
