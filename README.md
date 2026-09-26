@@ -6,54 +6,73 @@ This is an OpenCode port of [tamaratran/fast-jev-compaction](https://github.com/
 
 Instead of summarizing tool history, the plugin asks a decision model whether each completed tool call and its full result still matter. User and assistant text is kept verbatim. A tool result may be kept, truncated, or removed together with its call.
 
-## Backends
+## Install
+
+Add the plugin directly to `opencode.json`. No wrapper plugin file and no `.opencode/package.json` are required.
 
 ### TypeSafe JEV
 
-Default backend. Set `TYPESAFE_API_KEY` in the environment, or pass `apiKey`.
+Set the API key:
 
-```ts
-import { FastJevCompaction } from "fast-jev-compaction-opencode"
-
-export const FastJev = (ctx: Parameters<typeof FastJevCompaction>[0]) =>
-  FastJevCompaction(ctx, {
-    backend: "typesafe",
-    model: "jev-latest"
-  })
+```sh
+export TYPESAFE_API_KEY=...
 ```
 
-### Local / LM Studio
-
-Uses an OpenAI-compatible `/v1/chat/completions` endpoint and reads option probabilities from `top_logprobs`.
-
-```ts
-import { FastJevCompaction } from "fast-jev-compaction-opencode"
-
-export const FastJev = (ctx: Parameters<typeof FastJevCompaction>[0]) =>
-  FastJevCompaction(ctx, {
-    backend: "local",
-    localBaseUrl: "http://127.0.0.1:1234/v1",
-    localModel: "jev-style-qwen3.5-2b-decision-mlx",
-    localConcurrency: 2,
-    localContextTokens: 64000
-  })
-```
-
-The local backend is compatible with LM Studio and other OpenAI-compatible servers that return token log probabilities. The reference local model is `chaoliangUNSW/Jev-Style-Qwen3.5-2B-Decision-MLX-bf16`.
-
-## Install from GitHub
-
-OpenCode can load TypeScript plugins from `.opencode/plugins/`. Add this package as a config-directory dependency:
+Then add:
 
 ```json
 {
-  "dependencies": {
-    "fast-jev-compaction-opencode": "github:overbit/fast-jev-compaction-opencode"
-  }
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["github:overbit/fast-jev-compaction-opencode"]
 }
 ```
 
-Save that as `.opencode/package.json`, then create `.opencode/plugins/fast-jev.ts` using one of the examples above. OpenCode installs config-directory dependencies with Bun at startup.
+That is the complete TypeSafe installation.
+
+### Local / LM Studio
+
+With LM Studio listening on its default OpenAI-compatible URL and the default JEV-style model loaded:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": [
+    [
+      "github:overbit/fast-jev-compaction-opencode",
+      {
+        "backend": "local"
+      }
+    ]
+  ]
+}
+```
+
+The local defaults are:
+
+- URL: `http://127.0.0.1:1234/v1`
+- model: `jev-style-qwen3.5-2b-decision-mlx`
+- concurrency: `2`
+- context window: `64000`
+
+The reference local model is `chaoliangUNSW/Jev-Style-Qwen3.5-2B-Decision-MLX-bf16`.
+
+To override the endpoint or model:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": [
+    [
+      "github:overbit/fast-jev-compaction-opencode",
+      {
+        "backend": "local",
+        "localBaseUrl": "http://127.0.0.1:1234/v1",
+        "localModel": "my-jev-model"
+      }
+    ]
+  ]
+}
+```
 
 ## Configuration
 
@@ -77,11 +96,13 @@ Save that as `.opencode/package.json`, then create `.opencode/plugins/fast-jev.t
 
 ## OpenCode 2.x integration
 
+The plugin exposes a dedicated OpenCode `./server` package entrypoint, so OpenCode can install and load the GitHub package directly from the `plugin` field.
+
 The current OpenCode host plugin API exposes `experimental.chat.messages.transform`, which is used here to prune completed tool history before model calls.
 
-The separate `@opencode-ai/plugin/v2/promise` extension surface currently does not expose session/message compaction hooks, so this project intentionally targets the OpenCode 2.x host plugin API rather than relying on a nonexistent v2 compaction hook.
+The separate `@opencode-ai/plugin/v2/promise` extension surface currently does not expose session/message compaction hooks, so this project targets the supported OpenCode 2.x host plugin API.
 
-By default, OpenCode's built-in automatic compaction remains enabled as a safety fallback. After verifying the JEV backend in your environment, set `disableBuiltinAutoCompaction: true` if you want this plugin to be the only automatic context-pruning mechanism. Manual OpenCode compaction remains OpenCode-controlled.
+By default, OpenCode's built-in automatic compaction remains enabled as a safety fallback. After verifying the JEV backend in your environment, set `disableBuiltinAutoCompaction: true` if you want this plugin to be the only automatic context-pruning mechanism.
 
 If TypeSafe JEV or the local server fails, the transform leaves the message history unchanged.
 
@@ -102,6 +123,7 @@ The pruning algorithm is inherited from the upstream implementation:
 npm install
 npm run typecheck
 npm test
+npm run build
 ```
 
 The tests do not contact TypeSafe or LM Studio.
