@@ -219,9 +219,18 @@ function createAsker(config: FastJevConfig): JevAsker {
   });
 }
 
-export const FastJevCompaction: Plugin = async (_input, options = {}) => {
+export const FastJevCompaction: Plugin = async (input, options = {}) => {
   const config = resolveConfig(options);
   const asker = createAsker(config);
+
+  await input.client.app.log({
+    body: {
+      service: 'fast-jev-compaction-opencode',
+      level: 'info',
+      message: 'Plugin initialized',
+      extra: { backend: config.backend },
+    },
+  }).catch(() => undefined);
 
   return {
     config: async (opencode) => {
