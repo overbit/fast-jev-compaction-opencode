@@ -1,7 +1,7 @@
 {
   "name": "fast-jev-compaction-opencode",
-  "version": "0.1.0",
-  "description": "Verbatim Jev-guided compaction for OpenCode v2 with TypeSafe and local OpenAI-compatible backends.",
+  "version": "0.2.0",
+  "description": "Verbatim JEV-guided compaction for OpenCode V2 with TypeSafe and local OpenAI-compatible backends.",
   "type": "module",
   "license": "MIT",
   "main": "./src/index.ts",
@@ -34,7 +34,12 @@
   "devDependencies": {
     "@types/node": "^22.10.2",
     "typescript": "^5.7.2",
-    "vitest": "^2.1.8",
-    "@opencode-ai/plugin": "1.18.32"
+    "vitest": "^2.1.8"
+  },
+  "dependencies": {
+    "@opencode/plugin": "^2.0.4"
+  },
+  "engines": {
+    "opencode": ">=2.0.0 <3"
   }
 }
