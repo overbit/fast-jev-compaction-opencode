@@ -6,38 +6,35 @@ import { describe, expect, it } from 'vitest';
 import server from '../src/server.js';
 import tui from '../src/tui.js';
 
-describe('OpenCode package entrypoints', () => {
-  it('exports a directly loadable server plugin', () => {
+describe('OpenCode V2 package entrypoints', () => {
+  it('exports a V2 server plugin definition', () => {
     expect(server.id).toBe('fast-jev-compaction-opencode');
-    expect(typeof server.server).toBe('function');
+    expect(typeof server.setup).toBe('function');
   });
 
-  it('exports a TUI companion for the Plugins dialog', () => {
+  it('exports a V2 TUI plugin definition', () => {
     expect(tui.id).toBe('fast-jev-compaction-opencode');
-    expect(typeof tui.tui).toBe('function');
+    expect(typeof tui.setup).toBe('function');
   });
 
-  it('ships source entrypoints that do not require install scripts', () => {
+  it('ships source entrypoints without git preparation hooks', () => {
     const pkg = JSON.parse(readFileSync(resolve('package.json'), 'utf8')) as {
       files?: string[];
       exports?: Record<string, { import?: string }>;
       scripts?: Record<string, string>;
       workspaces?: unknown;
+      dependencies?: Record<string, string>;
+      engines?: Record<string, string>;
     };
 
     expect(pkg.files).toContain('src');
+    expect(pkg.exports?.['.']?.import).toBe('./src/index.ts');
     expect(pkg.exports?.['./server']?.import).toBe('./src/server.ts');
     expect(pkg.exports?.['./tui']?.import).toBe('./src/tui.ts');
+    expect(pkg.dependencies?.['@opencode/plugin']).toMatch(/^\^2\./);
+    expect(pkg.engines?.opencode).toContain('>=2.0.0');
 
-    const gitPreparationTriggers = [
-      'build',
-      'prepare',
-      'preinstall',
-      'install',
-      'postinstall',
-      'prepack',
-    ];
-    for (const name of gitPreparationTriggers) {
+    for (const name of ['build', 'prepare', 'preinstall', 'install', 'postinstall', 'prepack']) {
       expect(pkg.scripts?.[name]).toBeUndefined();
     }
     expect(pkg.workspaces).toBeUndefined();
