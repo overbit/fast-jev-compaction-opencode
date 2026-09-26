@@ -13,8 +13,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - uses: oven-sh/setup-bun@v2
       - run: npm install
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - run: npm pack --ignore-scripts --dry-run
+      - name: Smoke-test scriptless plugin package
+        run: |
+          tarball=$(npm pack --ignore-scripts --silent)
+          mkdir -p /tmp/fast-jev-package
+          tar -xzf "$tarball" -C /tmp/fast-jev-package
+          bun -e 'const mod = await import("/tmp/fast-jev-package/package/src/server.ts"); if (typeof mod.default?.server !== "function") process.exit(1)'
