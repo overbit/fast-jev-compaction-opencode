@@ -93,3 +93,4 @@ export default Plugin.define({
 export * from "./adapter.js"
 export * from "./backends.js"
 export * from "./core.js"
+export * from './plugin.js';
