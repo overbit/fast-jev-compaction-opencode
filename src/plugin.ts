@@ -226,8 +226,11 @@ export const FastJevCompaction: Plugin = async (_input, options = {}) => {
   return {
     config: async (opencode) => {
       if (!config.disableBuiltinAutoCompaction) return;
-      opencode.compaction = {
-        ...(opencode.compaction ?? {}),
+      const hostConfig = opencode as typeof opencode & {
+        compaction?: { auto?: boolean; prune?: boolean; [key: string]: unknown };
+      };
+      hostConfig.compaction = {
+        ...(hostConfig.compaction ?? {}),
         auto: false,
         prune: false,
       };
