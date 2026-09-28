@@ -1,8 +1,10 @@
 import { Plugin } from '@opencode/plugin';
 
-import { compact, reductionRatio, resolveOptions } from './compact.js';
 import { JevClient } from './client.js';
+import { compact, reductionRatio, resolveOptions } from './compact.js';
 import { LOCAL_BASE_URL, LOCAL_MODEL, LocalJevAsker } from './local.js';
+import { createLogger, defaultLogPath, errorSummary, safeUrl, type Logger } from './log.js';
+import { collectToolCalls } from './state.js';
 import type { CompactOptions, CompactResult, JevAsker, Message } from './types.js';
 
 type Backend = 'typesafe' | 'local';
@@ -53,6 +55,7 @@ export interface FastJevConfig extends CompactOptions {
   baseUrl?: string;
   localModel?: string;
   localBaseUrl?: string;
+  logFile?: string;
   localConcurrency: number;
   localContextTokens: number;
   minReductionRatio: number;
@@ -95,7 +98,7 @@ export function resolveConfig(options: PluginOptions = {}): FastJevConfig {
     if (typeof value === 'number' && Number.isFinite(value)) config[key] = value;
   }
 
-  for (const key of ['apiKey', 'model', 'baseUrl', 'localModel', 'localBaseUrl', 'goal'] as const) {
+  for (const key of ['apiKey', 'model', 'baseUrl', 'localModel', 'localBaseUrl', 'logFile', 'goal'] as const) {
     const value = stringOption(options, key);
     if (value) config[key] = value;
   }
@@ -230,16 +233,48 @@ export function serializeCompaction(messages: readonly Message[]): string {
   return out.join('\n');
 }
 
-function createAsker(config: FastJevConfig): JevAsker {
+function partCensus(messages: readonly NativeMessage[]): {
+  roles: Record<string, number>;
+  parts: Record<string, number>;
+} {
+  const roles: Record<string, number> = Object.create(null) as Record<string, number>;
+  const parts: Record<string, number> = Object.create(null) as Record<string, number>;
+  for (const message of messages) {
+    roles[message.role] = (roles[message.role] ?? 0) + 1;
+    for (const part of message.content) parts[part.type] = (parts[part.type] ?? 0) + 1;
+  }
+  return { roles, parts };
+}
+
+function createAsker(config: FastJevConfig, logger: Logger): JevAsker {
   if (config.backend === 'local') {
     return new LocalJevAsker({
       baseUrl: config.localBaseUrl,
       model: config.localModel,
       concurrency: config.localConcurrency,
       contextTokens: config.localContextTokens,
+      onDecision: (name, probability) => {
+        logger.info('classifier decision', { question: name, noul: probability });
+      },
       fetch: async (url, init) => {
-        const response = await fetch(url, init);
-        return { status: response.status, ok: response.ok, text: await response.text() };
+        const started = Date.now();
+        logger.info('classifier request', { method: init.method, url: safeUrl(url) });
+        try {
+          const response = await fetch(url, init);
+          const text = await response.text();
+          logger.info('classifier response', {
+            status: response.status,
+            ok: response.ok,
+            durationMs: Date.now() - started,
+          });
+          return { status: response.status, ok: response.ok, text };
+        } catch (error) {
+          logger.warn('classifier transport error', {
+            durationMs: Date.now() - started,
+            ...errorSummary(error),
+          });
+          throw error;
+        }
       },
     });
   }
@@ -271,8 +306,6 @@ export async function compactOpenCodeMessages(
   return result;
 }
 
-const LOG_PREFIX = '[fast-jev-compaction-opencode]';
-
 function percent(value: number): string {
   return Math.round(value * 100) + '%';
 }
@@ -283,91 +316,100 @@ export const FastJevCompaction = Plugin.define({
   async setup(ctx) {
     const config = resolveConfig(ctx.options as PluginOptions);
     const resolved = resolveOptions(config);
-    const asker = createAsker(config);
+    const logFile = config.logFile ?? defaultLogPath();
+    const logger = createLogger(logFile);
+    const asker = createAsker(config, logger);
     const backendDetails =
       config.backend === 'local'
-        ? ' endpoint=' + (config.localBaseUrl ?? LOCAL_BASE_URL) + ' model=' + (config.localModel ?? LOCAL_MODEL)
-        : '';
+        ? {
+            endpoint: safeUrl(config.localBaseUrl ?? LOCAL_BASE_URL),
+            model: config.localModel ?? LOCAL_MODEL,
+          }
+        : {};
 
-    console.info(
-      LOG_PREFIX +
-        ' initialized backend=' +
-        config.backend +
-        backendDetails +
-        ' preserveRecentMessages=' +
-        resolved.preserveRecentMessages +
-        ' minReductionRatio=' +
-        percent(config.minReductionRatio),
-    );
+    logger.info('initialized', {
+      backend: config.backend,
+      ...backendDetails,
+      localConcurrency: config.localConcurrency,
+      localContextTokens: config.localContextTokens,
+      preserveRecentMessages: resolved.preserveRecentMessages,
+      keepThreshold: resolved.keepThreshold,
+      maxStateTokens: resolved.maxStateTokens,
+      maxRequestTokens: resolved.maxRequestTokens,
+      truncateHeadChars: resolved.truncateHeadChars,
+      minReductionRatio: config.minReductionRatio,
+      logFile,
+    });
 
     await ctx.session.hook('compaction', async (event) => {
       const sessionID = event.sessionID;
-      console.info(
-        LOG_PREFIX +
-          ' compaction hook session=' +
-          sessionID +
-          ' messages=' +
-          event.messages.length +
-          ' backend=' +
-          config.backend,
-      );
+      const nativeMessages = event.messages as unknown as NativeMessage[];
 
       try {
-        const result = await runOpenCodeCompaction(
-          event.messages as unknown as NativeMessage[],
-          asker,
-          config,
-        );
+        const census = partCensus(nativeMessages);
+        logger.info('compaction hook entered', {
+          session: sessionID,
+          rawMessages: nativeMessages.length,
+          roles: census.roles,
+          parts: census.parts,
+          backend: config.backend,
+        });
+
+        const transcript = toCompactionMessages(nativeMessages);
+        const calls = collectToolCalls(transcript, resolved.preserveRecentMessages);
+        const candidateCalls = calls.filter((call) => !call.pinned).length;
+        logger.info('transcript adapted', {
+          session: sessionID,
+          adaptedMessages: transcript.length,
+          emptyDropped: nativeMessages.length - transcript.length,
+          completedCalls: calls.length,
+          pinned: calls.length - candidateCalls,
+          candidates: candidateCalls,
+        });
+
+        if (transcript.length === 0) {
+          logger.info('compaction outcome', {
+            session: sessionID,
+            outcome: 'fallback',
+            reason: 'no-adaptable-messages',
+          });
+          return;
+        }
+
+        const result = await compact(transcript, asker, config);
         if (!result) {
-          console.info(
-            LOG_PREFIX +
-              ' fallback session=' +
-              sessionID +
-              ' reason=no-adaptable-messages',
-          );
+          logger.info('compaction outcome', {
+            session: sessionID,
+            outcome: 'fallback',
+            reason: 'no-compaction-result',
+          });
           return;
         }
 
         const ratio = reductionRatio(result);
-        const candidateCalls = Math.max(0, result.stats.calls - result.stats.pinned);
-        console.info(
-          LOG_PREFIX +
-            ' classified session=' +
-            sessionID +
-            ' calls=' +
-            result.stats.calls +
-            ' candidates=' +
-            candidateCalls +
-            ' pinned=' +
-            result.stats.pinned +
-            ' jevBatches=' +
-            result.stats.requests +
-            ' reduction=' +
-            percent(ratio),
-        );
-
-        if (result.stats.requests === 0) {
-          console.info(
-            LOG_PREFIX +
-              ' classifier not called session=' +
-              sessionID +
-              ' reason=no-eligible-completed-tool-calls' +
-              ' preserveRecentMessages=' +
-              resolved.preserveRecentMessages,
-          );
-        }
+        logger.info('classification complete', {
+          session: sessionID,
+          calls: result.stats.calls,
+          candidates: Math.max(0, result.stats.calls - result.stats.pinned),
+          pinned: result.stats.pinned,
+          jevBatches: result.stats.requests,
+          stateTokens: result.stats.stateTokens,
+          stateStage: result.stats.stateStage,
+          reduction: percent(ratio),
+        });
 
         if (ratio < config.minReductionRatio) {
-          console.info(
-            LOG_PREFIX +
-              ' fallback session=' +
-              sessionID +
-              ' reason=below-minimum-reduction' +
-              ' reduction=' +
-              percent(ratio) +
-              ' minimum=' +
-              percent(config.minReductionRatio),
-          );
+          const reason =
+            result.stats.requests === 0
+              ? 'no-eligible-completed-tool-calls'
+              : 'below-minimum-reduction';
+          logger.info('compaction outcome', {
+            session: sessionID,
+            outcome: 'fallback',
+            reason,
+            reduction: percent(ratio),
+            minimum: percent(config.minReductionRatio),
+          });
           return;
         }
 
@@ -387,20 +429,18 @@ export const FastJevCompaction = Plugin.define({
           },
         };
 
-        console.info(
-          LOG_PREFIX +
-            ' override applied session=' +
-            sessionID +
-            ' backend=' +
-            config.backend +
-            ' reduction=' +
-            percent(ratio),
-        );
+        logger.info('compaction outcome', {
+          session: sessionID,
+          outcome: 'override',
+          backend: config.backend,
+          reduction: percent(ratio),
+        });
       } catch (error) {
-        console.warn(
-          LOG_PREFIX + ' falling back to OpenCode compaction session=' + sessionID + ':',
-          error instanceof Error ? error.message : String(error),
-        );
+        logger.warn('compaction outcome', {
+          session: sessionID,
+          outcome: 'fallback',
+          ...errorSummary(error),
+        });
       }
     });
   },

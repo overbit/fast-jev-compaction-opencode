@@ -236,6 +236,8 @@ export interface LocalJevAskerOptions {
   signal?: AbortSignal;
   /** Estimated token ceiling for one prompt. Default 64000. */
   contextTokens?: number;
+  /** Called once for each successfully parsed decision. */
+  onDecision?: (name: string, probability: number) => void;
   /** The transport: `fetchText` (global `fetch`) or a host's, like `$.http.fetch`. */
   fetch: LocalFetch;
 }
@@ -277,6 +279,7 @@ export class LocalJevAsker implements JevAsker {
   private readonly priority: Priority;
   private readonly deadline: number | undefined;
   private readonly signal: AbortSignal | undefined;
+  private readonly onDecision: ((name: string, probability: number) => void) | undefined;
 
   constructor(options: LocalJevAskerOptions) {
     this.baseUrl = options.baseUrl ?? LOCAL_BASE_URL;
@@ -291,6 +294,7 @@ export class LocalJevAsker implements JevAsker {
     this.priority = options.priority ?? 'high';
     this.deadline = options.deadline;
     this.signal = options.signal;
+    this.onDecision = options.onDecision;
   }
 
   private expired(): boolean {
@@ -316,6 +320,7 @@ export class LocalJevAsker implements JevAsker {
             const decision = await this.request(state, question.instructions, noulOptions(question));
             if (stopped) return;
             answers[name] = { type: 'noul', noul: decision.probabilities[0]! };
+            this.onDecision?.(name, decision.probabilities[0]!);
             inputTokens += decision.promptTokens ?? 0;
             decided++;
           } catch (error) {
