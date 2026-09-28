@@ -31,9 +31,94 @@ export TYPESAFE_API_KEY=...
 
 No plugin options are required.
 
-### Local / LM Studio
+### Local model
 
-OpenCode V2 uses the `plugins` config key and object-form options:
+The recommended small local model is
+[`chaoliangUNSW/Jev-Style-0.8B-Decision-v3-GGUF`](https://huggingface.co/chaoliangUNSW/Jev-Style-0.8B-Decision-v3-GGUF).
+
+It is a 0.8B Qwen3.5 decision model with these published GGUF sizes:
+
+| Quantization | Model file | Notes |
+| --- | ---: | --- |
+| Q4_K_M | 0.53 GB | Recommended minimum-memory build |
+| Q8_0 | 0.81 GB | More precision with a still-small footprint |
+| F16 | 1.52 GB | Full-precision GGUF reference |
+
+The v3 runtime supports up to **25,600 input tokens per decision** and opens a
+**32,768-token context** to leave room for the question/options/readout.
+
+#### Important: v3 needs its scoring runtime
+
+The v3 model is not a normal chat classifier. Its decisions are read from dedicated
+verdict slots. Stock LM Studio, Ollama, llama.cpp chat generation, or
+`mlx_lm.generate` can load the weights, but ordinary text generation does not expose
+the decision scores the plugin needs.
+
+Use the model author's `jev-style` / bundled `jev-score` runtime for v3:
+
+```sh
+# CPU / CUDA / Linux / Windows
+pip install "jev-style[torch]"
+
+# Apple silicon
+pip install "jev-style[mlx]"
+
+# Download and serve the default 0.8B v3 release
+jev-style serve
+```
+
+The model server exposes a System One-compatible API, normally at
+`http://127.0.0.1:8765/v1/systemone`.
+
+> **Current plugin compatibility:** the plugin's `backend: "local"` path still uses
+> OpenAI `/chat/completions + top_logprobs`, so it is compatible with the older
+> Jev-Style Qwen3.5 2B v1 model, not the v3 scorer above. Do not point the existing
+> LM Studio backend at the v3 GGUF and expect valid decisions. The v3 model is documented
+> here as the preferred model/runtime direction; until the plugin has a direct
+> System One local backend, use the legacy LM Studio setup below for working local
+> compaction.
+
+References:
+
+- [Jev-Style 0.8B v3 GGUF model card](https://huggingface.co/chaoliangUNSW/Jev-Style-0.8B-Decision-v3-GGUF)
+- [Jev-Style runtime](https://github.com/lawrence3699/jev-style)
+- [LM Studio-compatible 2B reference implementation](https://github.com/lkntfnd/fast-jev-compaction-local)
+
+#### Machine requirements for the 0.8B v3 GGUF
+
+A GPU is **not required**. The model author supports CPU execution, Apple Silicon/MLX,
+CUDA and the bundled llama.cpp scorer. The table below is practical deployment guidance
+for running the classifier alongside OpenCode; it is intentionally more conservative than
+the raw model-file size.
+
+| Setup | Practical minimum | Recommended settings / notes |
+| --- | --- | --- |
+| CPU-only | 4-core 64-bit CPU, **4 GB free RAM**, Q4_K_M | Suitable for shorter states; expect higher compaction latency |
+| General laptop / desktop | **8 GB RAM**, Q4_K_M or Q8_0 | Good baseline when the main coding model is remote |
+| Apple Silicon | M1 or newer, **8 GB unified memory** | 16 GB recommended if OpenCode and other developer tools are active |
+| Discrete GPU | **2 GB VRAM** for the model; **4 GB+ VRAM recommended** | Keep enough headroom for KV/cache and runtime allocations |
+| Comfortable full-context setup | **16 GB system/unified RAM** or **4-8 GB+ VRAM** | Best target for long 20K-25.6K decision states |
+
+The **4 GB** figure is a practical floor, not a guarantee for every OS/runtime combination.
+The 0.53 GB Q4 weights are only part of memory use: the Python/runtime process, tokenizer,
+KV/cache, OpenCode itself and the loaded decision context all consume additional memory.
+
+If the machine is memory constrained, reduce the compaction state/request limits rather
+than relying on the model's full 25.6K input capacity. If the main coding LLM is also
+running locally, add its memory requirements on top of these numbers.
+
+#### Legacy LM Studio backend
+
+The currently implemented `backend: "local"` uses an OpenAI-compatible
+`/chat/completions` endpoint and reads `top_logprobs`. Its supported default remains the
+older LM Studio-compatible 2B v1 decision model:
+
+- endpoint: `http://127.0.0.1:1234/v1`
+- model: `jev-style-qwen3.5-2b-decision-mlx`
+- concurrency: `2`
+- local context ceiling: `64000`
+
+Configure it with:
 
 ```jsonc
 {
@@ -49,55 +134,13 @@ OpenCode V2 uses the `plugins` config key and object-form options:
 }
 ```
 
-Defaults:
-
-- endpoint: `http://127.0.0.1:1234/v1`
-- model: `jev-style-qwen3.5-2b-decision-mlx`
-- concurrency: `2`
-- local context ceiling: `64000`
-
-The current LM Studio adapter uses the older Jev-Style Qwen3.5 2B decision model because it
-exposes the next-token `top_logprobs` that this plugin reads. The newer Jev-Style v3
-0.8B/2B releases use their own scoring runtime; the model author explicitly notes that
-stock LM Studio can load those weights but cannot produce the v3 decision scores. Do not
-set `localModel` to a v3 checkpoint with this backend unless a future LM Studio/runtime
-exposes the required scoring protocol.
-
-References:
-
-- [Jev-Style runtime and model compatibility](https://github.com/lawrence3699/jev-style)
-- [Jev-Style Qwen3.5 2B v1 GGUF](https://huggingface.co/chaoliangUNSW/Jev-Style-Qwen3.5-2B-Decision-GGUF)
-- [local LM Studio reference implementation](https://github.com/lkntfnd/fast-jev-compaction-local)
-
-#### Minimum machine requirements
-
-The model is small by current LLM standards, but the loaded context also consumes memory.
-Published v1 GGUF weight sizes are about **1.3 GB (Q4_K_M)**, **2.1 GB (Q8_0)** and
-**3.9 GB (BF16)**. The figures below are conservative deployment guidance for this plugin,
-not official hardware guarantees from the model author:
-
-| Setup | Practical minimum | Suggested plugin settings |
-| --- | --- | --- |
-| CPU-only / low-memory laptop | 8 GB system RAM, modern 4-core CPU, Q4_K_M | `localConcurrency: 1`, `localContextTokens: 8000-16000` |
-| Small discrete GPU | 4 GB VRAM + 8 GB system RAM, Q4_K_M | `localConcurrency: 1`, `localContextTokens: 16000` |
-| Recommended general setup | 16 GB RAM/unified memory or 8 GB+ VRAM | `localConcurrency: 2`, `localContextTokens: 32000-64000` |
-| Apple Silicon | M1 or newer; 16 GB unified memory recommended | MLX build in LM Studio, `localConcurrency: 2` |
-
-A GPU is **not required**. CPU inference works, but compaction can be noticeably slower
-because fast-JEV may make two classifier decisions for each eligible completed tool call.
-For the default `64000` context ceiling, use substantially more memory than the model
-weights alone require; on an 8 GB machine, lower `localContextTokens` first.
-
-`localContextTokens` is only the plugin-side safety ceiling. It must be no higher than
-the context length actually loaded in LM Studio. If LM Studio is configured for 16K,
-set the plugin to `16000` (or slightly below) instead of leaving the 64K default.
+For that older 2B model, a practical baseline is **8 GB system RAM** with Q4 and
+`localConcurrency: 1`; **16 GB RAM/unified memory or 8 GB+ VRAM** is the recommended
+target for larger contexts and concurrency 2.
 
 The classifier needs `logprobs` with `top_logprobs`, because it decides by reading the
-probability distribution over the option letters. A model that answers in
-`reasoning_content` instead returns `logprobs: null` and cannot drive it, regardless of
-endpoint or authentication. The documented 2B v1 model above is the supported default for
-this LM Studio adapter. If compaction falls back on every run, check the `reason` in the
-log first.
+probability distribution over option letters. A model that answers in
+`reasoning_content` and returns `logprobs: null` cannot drive this backend.
 
 Override the endpoint/model when needed:
 
@@ -110,15 +153,15 @@ Override the endpoint/model when needed:
       "options": {
         "backend": "local",
         "localBaseUrl": "http://127.0.0.1:1234/v1",
-        "localModel": "my-jev-model"
+        "localModel": "jev-style-qwen3.5-2b-decision-mlx"
       }
     }
   ]
 }
 ```
 
-`localBaseUrl` must include the OpenAI-compatible path prefix (`/v1` for LM Studio). A
-proxy that authenticates also needs `localApiKey`, which is sent as
+`localBaseUrl` must include the OpenAI-compatible path prefix (`/v1` for LM Studio).
+A proxy that authenticates also needs `localApiKey`, which is sent as
 `Authorization: Bearer`:
 
 ```jsonc
@@ -129,7 +172,7 @@ proxy that authenticates also needs `localApiKey`, which is sent as
       "options": {
         "backend": "local",
         "localBaseUrl": "http://127.0.0.1:8080/v1",
-        "localModel": "jev-style-qwen3.5-2b-decision",
+        "localModel": "jev-style-qwen3.5-2b-decision-mlx",
         "localApiKey": "{env:MODEL_PROXY_API_KEY}"
       }
     }
@@ -137,12 +180,11 @@ proxy that authenticates also needs `localApiKey`, which is sent as
 }
 ```
 
-The proxy must pass `logprobs` and `top_logprobs` through untouched, and must not inject
-`tools` or force streaming; an LM Studio backend rejects `logprobs` in that combination.
-A router that namespaces model ids (a `provider/model` prefix) will also read that prefix
-as a provider to authenticate for and answer 401, so use the bare model id.
+The proxy must pass `logprobs` and `top_logprobs` through untouched and must not inject
+tools or force streaming. A router that namespaces model ids (a `provider/model` prefix)
+may interpret that prefix as a provider to authenticate for, so use the bare model id.
 
-`localApiKey` is separate from the TypeSafe `apiKey` so a TypeSafe credential is never
+`localApiKey` is separate from the TypeSafe `apiKey`, so a TypeSafe credential is never
 sent to a local endpoint or proxy. It is never written to the plugin log; the
 `initialized` line reports only `apiKey: set` or `apiKey: none`.
 
@@ -200,7 +242,7 @@ OpenCode V2 currently accepts a compaction result as a summary string, not an ar
 | `model` | `jev-latest` | TypeSafe JEV model |
 | `baseUrl` | TypeSafe System One | Remote TypeSafe endpoint |
 | `localBaseUrl` | `http://127.0.0.1:1234/v1` | OpenAI-compatible local endpoint |
-| `localModel` | `jev-style-qwen3.5-2b-decision-mlx` | LM Studio-compatible Jev-Style Qwen3.5 2B v1 model id |
+| `localModel` | `jev-style-qwen3.5-2b-decision-mlx` | Legacy LM Studio backend model; v3 GGUF requires its dedicated scorer/runtime |
 | `localApiKey` | none | Bearer token for `localBaseUrl`; needed when a proxy fronts the model |
 | `localConcurrency` | `2` | Parallel local decisions |
 | `localContextTokens` | `64000` | Local decision prompt ceiling; must not exceed the context loaded in LM Studio |
