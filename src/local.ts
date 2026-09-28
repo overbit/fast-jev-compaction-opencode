@@ -10,7 +10,7 @@ import type {
 } from './types.js';
 
 export const LOCAL_BASE_URL = 'http://127.0.0.1:1234/v1';
-export const LOCAL_MODEL = 'jev-style-0.8b-decision-v3';
+export const LOCAL_MODEL = 'jev-style-qwen3.5-2b-decision-mlx';
 export const LOCAL_CONCURRENCY = 2;
 /** A little under LM Studio's 64K setting, which it loads as 64380 tokens. */
 export const LOCAL_CONTEXT_TOKENS = 64_000;
@@ -296,7 +296,7 @@ export class DeadlineError extends Error {
 export interface LocalJevAskerOptions {
   /** OpenAI-compatible base URL; defaults to LM Studio's `http://127.0.0.1:1234/v1`. */
   baseUrl?: string;
-  /** Defaults to `jev-style-0.8b-decision-v3`. */
+  /** Defaults to the LM Studio-compatible Jev-Style Qwen3.5 2B v1 model. */
   model?: string;
   /** Decisions in flight at once, across every `ask`. Default 2; ignored with `scheduler`. */
   concurrency?: number;

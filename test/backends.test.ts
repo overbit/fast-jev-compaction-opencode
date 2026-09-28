@@ -129,6 +129,11 @@ describe('local backend', () => {
     });
   });
 
+  it('uses the LM Studio-compatible 2B decision model by default', () => {
+    const request = buildLocalRequest({}, 'hi');
+    expect(JSON.parse(request.body).model).toBe('jev-style-qwen3.5-2b-decision-mlx');
+  });
+
   it('sends a bearer token only when one is configured', () => {
     const withKey = buildLocalRequest({ apiKey: 'sk-local' }, 'hi');
     expect(withKey.headers.authorization).toBe('Bearer sk-local');
