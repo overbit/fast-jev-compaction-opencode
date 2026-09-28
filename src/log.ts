@@ -109,6 +109,11 @@ export function errorSummary(error: unknown): Record<string, string> {
   }
   if (/unreachable at /i.test(message)) return { errorName: name, reason: 'endpoint-unreachable' };
   if (/context overflow/i.test(message)) return { errorName: name, reason: 'context-overflow' };
+  // A `logprobs: null` model needs a different fix from a broken endpoint, so
+  // it is separated from the other unusable-reply cases.
+  if (/reasoning_content/i.test(message)) {
+    return { errorName: name, reason: 'model-has-no-logprobs' };
+  }
   if (/logprobs|candidate tokens|answered none of the options/i.test(message)) {
     return { errorName: name, reason: 'invalid-classifier-response' };
   }

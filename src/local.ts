@@ -10,7 +10,7 @@ import type {
 } from './types.js';
 
 export const LOCAL_BASE_URL = 'http://127.0.0.1:1234/v1';
-export const LOCAL_MODEL = 'jev-style-qwen3.5-2b-decision-mlx';
+export const LOCAL_MODEL = 'jev-style-0.8b-decision-v3';
 export const LOCAL_CONCURRENCY = 2;
 /** A little under LM Studio's 64K setting, which it loads as 64380 tokens. */
 export const LOCAL_CONTEXT_TOKENS = 64_000;
@@ -182,7 +182,12 @@ export function parseLocalResponse(
   const choice = Array.isArray(body?.choices) ? body.choices[0] : undefined;
   if (!choice) throw new Error('local classifier response has no choices');
   if (!choice.logprobs) {
-    throw new Error('local classifier returned no logprobs; the server must support top_logprobs');
+    // `logprobs: null` is how a model that answers in `reasoning_content`
+    // reports itself: the request succeeded, there is just no distribution to
+    // read. Naming that distinguishes an unusable model from a broken endpoint.
+    throw new Error(
+      'local classifier returned no logprobs; the model must emit top_logprobs (a model that answers in reasoning_content cannot serve this classifier)',
+    );
   }
   const top = choice.logprobs.content?.[0]?.top_logprobs;
   if (!Array.isArray(top) || top.length === 0) {
@@ -291,7 +296,7 @@ export class DeadlineError extends Error {
 export interface LocalJevAskerOptions {
   /** OpenAI-compatible base URL; defaults to LM Studio's `http://127.0.0.1:1234/v1`. */
   baseUrl?: string;
-  /** Defaults to `jev-style-qwen3.5-2b-decision-mlx`. */
+  /** Defaults to `jev-style-0.8b-decision-v3`. */
   model?: string;
   /** Decisions in flight at once, across every `ask`. Default 2; ignored with `scheduler`. */
   concurrency?: number;

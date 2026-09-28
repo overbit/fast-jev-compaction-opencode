@@ -52,9 +52,15 @@ OpenCode V2 uses the `plugins` config key and object-form options:
 Defaults:
 
 - endpoint: `http://127.0.0.1:1234/v1`
-- model: `jev-style-qwen3.5-2b-decision-mlx`
+- model: `jev-style-0.8b-decision-v3`
 - concurrency: `2`
 - local context ceiling: `64000`
+
+The classifier needs `logprobs` with `top_logprobs`, because it decides by reading the
+probability distribution over the option letters. A model that answers in
+`reasoning_content` instead returns `logprobs: null` and cannot drive it, regardless of
+endpoint or authentication; set `localModel` to a checkpoint that emits `top_logprobs`.
+If compaction falls back on every run, check the `reason` in the log first.
 
 Override the endpoint/model when needed:
 
@@ -85,14 +91,19 @@ proxy that authenticates also needs `localApiKey`, which is sent as
       "package": "github:overbit/fast-jev-compaction-opencode",
       "options": {
         "backend": "local",
-        "localBaseUrl": "http://127.0.0.1:20128/v1",
-        "localModel": "lm-studio/jev-style-qwen3.5-2b-decision",
-        "localApiKey": "{env:OMNIROUTE_API_KEY}"
+        "localBaseUrl": "http://127.0.0.1:8080/v1",
+        "localModel": "jev-style-qwen3.5-2b-decision",
+        "localApiKey": "{env:MODEL_PROXY_API_KEY}"
       }
     }
   ]
 }
 ```
+
+The proxy must pass `logprobs` and `top_logprobs` through untouched, and must not inject
+`tools` or force streaming; an LM Studio backend rejects `logprobs` in that combination.
+A router that namespaces model ids (a `provider/model` prefix) will also read that prefix
+as a provider to authenticate for and answer 401, so use the bare model id.
 
 `localApiKey` is separate from the TypeSafe `apiKey` so a TypeSafe credential is never
 sent to a local endpoint or proxy. It is never written to the plugin log; the
@@ -152,7 +163,7 @@ OpenCode V2 currently accepts a compaction result as a summary string, not an ar
 | `model` | `jev-latest` | TypeSafe JEV model |
 | `baseUrl` | TypeSafe System One | Remote TypeSafe endpoint |
 | `localBaseUrl` | `http://127.0.0.1:1234/v1` | OpenAI-compatible local endpoint |
-| `localModel` | `jev-style-qwen3.5-2b-decision-mlx` | Local model id |
+| `localModel` | `jev-style-0.8b-decision-v3` | Local model id |
 | `localApiKey` | none | Bearer token for `localBaseUrl`; needed when a proxy fronts the model |
 
 `localBaseUrl` must include the OpenAI-compatible path prefix (`/v1` for LM Studio).
@@ -175,7 +186,7 @@ Diagnostics go to `~/.local/share/opencode/log/fast-jev-compaction.log` (overrid
 only place these appear. Successful server load prints the resolved configuration:
 
 ```text
-2026-09-28T13:36:39.605Z [INFO] [fast-jev-compaction-opencode] initialized {"backend":"local","endpoint":"http://127.0.0.1:1234/v1","model":"jev-style-qwen3.5-2b-decision","apiKey":"none","preserveRecentMessages":6}
+2026-09-28T13:36:39.605Z [INFO] [fast-jev-compaction-opencode] initialized {"backend":"local","endpoint":"http://127.0.0.1:1234/v1","model":"jev-style-0.8b-decision-v3","apiKey":"none","preserveRecentMessages":6}
 ```
 
 A local request is only necessary when there is at least one **completed tool call outside
@@ -193,6 +204,7 @@ replaced OpenCode's summary; anything else fell back to normal compaction.
 | `http-request-failed` | The server refused; read `server` for its own message |
 | `endpoint-unreachable` | Nothing is listening at `localBaseUrl` |
 | `context-overflow` | The prompt exceeded the model's context window |
+| `model-has-no-logprobs` | The model answered in `reasoning_content` and sent `logprobs: null`; it cannot drive the classifier, so `localModel` must change |
 | `invalid-classifier-response` | No `logprobs`/`top_logprobs` in the reply; the endpoint cannot serve this classifier |
 | `malformed-classifier-response` | The reply was not a chat completion at all |
 | `classifier-error` | Unclassified; the `server` field carries the message |

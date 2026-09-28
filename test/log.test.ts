@@ -85,6 +85,19 @@ describe('file logger', () => {
     });
   });
 
+  it('separates a model that sends no distribution from a broken endpoint', () => {
+    const summary = errorSummary(
+      new Error(
+        'local classifier returned no logprobs; the model must emit top_logprobs (a model that answers in reasoning_content cannot serve this classifier)',
+      ),
+    );
+
+    expect(summary).toEqual({
+      errorName: 'Error',
+      reason: 'model-has-no-logprobs',
+    });
+  });
+
   it('classifies a 200 error envelope as a refusal rather than a failed request', () => {
     const summary = errorSummary(
       new Error('local classifier got an error envelope (200) server: Unexpected endpoint or method.'),

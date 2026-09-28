@@ -65,6 +65,21 @@ describe('local backend', () => {
   });
 
   describe('refusals', () => {
+    it('names the reasoning_content case, where the model answers but sends no distribution', () => {
+      // A model that answers in `reasoning_content` returns 200 with
+      // `logprobs: null`; nothing to read, and the endpoint is not at fault.
+      expect(() =>
+        parseLocalResponse(
+          200,
+          true,
+          JSON.stringify({
+            choices: [{ message: { content: '', reasoning_content: 'yes no' }, logprobs: null }],
+          }),
+          2,
+        ),
+      ).toThrow(/must emit top_logprobs.*reasoning_content/s);
+    });
+
     it('reads a 200 error envelope as a refusal, not a malformed response', () => {
       // LM Studio's router answers an unknown route with 200 and this body.
       expect(() =>
