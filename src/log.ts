@@ -89,8 +89,24 @@ export function errorSummary(error: unknown): Record<string, string> {
   const name = error instanceof Error ? error.name : 'UnknownError';
   const message = error instanceof Error ? error.message : String(error);
   const httpStatus = message.match(/\((\d{3})\)/)?.[1];
+  // The server's own diagnostic, already length-capped and whitespace-collapsed
+  // by the caller. A server can echo the request in an error, so this is only
+  // logged because the message is bounded and never the raw body.
+  const server = message.match(/ server: (.*)$/)?.[1];
+  const withServer = (base: Record<string, string>) => (server ? { ...base, server } : base);
 
-  if (httpStatus) return { errorName: name, reason: 'http-request-failed', status: httpStatus };
+  // An envelope on a 2xx is a refused route or model, not a transport failure;
+  // it must be checked before the status, or a 200 reads as a failed request.
+  if (/got an error envelope/i.test(message)) {
+    return withServer({
+      errorName: name,
+      reason: 'server-error-envelope',
+      ...(httpStatus ? { status: httpStatus } : {}),
+    });
+  }
+  if (httpStatus) {
+    return withServer({ errorName: name, reason: 'http-request-failed', status: httpStatus });
+  }
   if (/unreachable at /i.test(message)) return { errorName: name, reason: 'endpoint-unreachable' };
   if (/context overflow/i.test(message)) return { errorName: name, reason: 'context-overflow' };
   if (/logprobs|candidate tokens|answered none of the options/i.test(message)) {

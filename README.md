@@ -154,6 +154,11 @@ OpenCode V2 currently accepts a compaction result as a summary string, not an ar
 | `localBaseUrl` | `http://127.0.0.1:1234/v1` | OpenAI-compatible local endpoint |
 | `localModel` | `jev-style-qwen3.5-2b-decision-mlx` | Local model id |
 | `localApiKey` | none | Bearer token for `localBaseUrl`; needed when a proxy fronts the model |
+
+`localBaseUrl` must include the OpenAI-compatible path prefix (`/v1` for LM Studio).
+Omitting it is the most common misconfiguration, and it fails quietly: LM Studio's
+router answers the unknown route with `200` and an error envelope, so the failure
+surfaces as a classifier refusal rather than a bad-config error.
 | `localConcurrency` | `2` | Parallel local decisions |
 | `localContextTokens` | `64000` | Local decision prompt ceiling |
 | `keepThreshold` | `0.5` | Minimum probability to keep a call/result |
@@ -165,19 +170,32 @@ OpenCode V2 currently accepts a compaction result as a summary string, not an ar
 
 ## Troubleshooting
 
-Successful server load prints an initialization line. For the local backend it includes the selected LM Studio endpoint and model, for example:
+Diagnostics go to `~/.local/share/opencode/log/fast-jev-compaction.log` (override with
+`logFile`). Plugin `console` output is not captured by OpenCode, so the log file is the
+only place these appear. Successful server load prints the resolved configuration:
 
 ```text
-[fast-jev-compaction-opencode] initialized backend=local endpoint=http://127.0.0.1:1234/v1 model=jev-style-qwen3.5-2b-decision-mlx preserveRecentMessages=6 minReductionRatio=25%
+2026-09-28T13:36:39.605Z [INFO] [fast-jev-compaction-opencode] initialized {"backend":"local","endpoint":"http://127.0.0.1:1234/v1","model":"jev-style-qwen3.5-2b-decision","apiKey":"none","preserveRecentMessages":6}
 ```
 
-Every OpenCode V2 compaction now logs hook entry and the classifier outcome. A local request is only necessary when there is at least one **completed tool call outside the pinned recent-message window**. With the default `preserveRecentMessages: 6`, a short session can therefore run `/compact` without contacting LM Studio; this is expected upstream fast-JEV behavior, not a failed hook.
+A local request is only necessary when there is at least one **completed tool call outside
+the pinned recent-message window**. With the default `preserveRecentMessages: 6`, a short
+session can therefore run `/compact` without contacting LM Studio; this is expected
+upstream fast-JEV behavior, not a failed hook.
 
-A no-request compaction is explicit in the server log:
+Each compaction ends in one `compaction outcome` line. `outcome: override` means the plugin
+replaced OpenCode's summary; anything else fell back to normal compaction.
 
-```text
-[fast-jev-compaction-opencode] classifier not called session=... reason=no-eligible-completed-tool-calls preserveRecentMessages=6
-```
+| `reason` | Meaning |
+| --- | --- |
+| `no-eligible-completed-tool-calls` | Nothing outside the pinned window; no request was needed |
+| `server-error-envelope` | The endpoint answered a 2xx with an error; usually a missing `/v1` in `localBaseUrl` |
+| `http-request-failed` | The server refused; read `server` for its own message |
+| `endpoint-unreachable` | Nothing is listening at `localBaseUrl` |
+| `context-overflow` | The prompt exceeded the model's context window |
+| `invalid-classifier-response` | No `logprobs`/`top_logprobs` in the reply; the endpoint cannot serve this classifier |
+| `malformed-classifier-response` | The reply was not a chat completion at all |
+| `classifier-error` | Unclassified; the `server` field carries the message |
 
 For a deterministic LM Studio smoke test, temporarily make every completed call eligible and accept any reduction:
 
@@ -196,7 +214,22 @@ For a deterministic LM Studio smoke test, temporarily make every completed call 
 }
 ```
 
-Run at least one tool call to completion and then run `/compact`. The log should show `backend=local`, `candidates=1` (or more), and `jevBatches=1` (or more), while LM Studio receives the decision requests. Restore the normal preservation/reduction settings after the smoke test.
+Run at least one tool call to completion and then run `/compact`. The log should show
+`"candidates":1` (or more) and `"outcome":"override"`, while LM Studio receives the
+decision requests. Restore the normal preservation/reduction settings after the smoke
+test.
+
+The classifier needs `logprobs` with `top_logprobs`, because it reads the probability
+distribution over the option letters. A proxy in front of the model that injects `tools`
+or forces streaming will break it, and the server will say so:
+
+```text
+[WARN] [fast-jev-compaction-opencode] compaction outcome {"outcome":"fallback","reason":"http-request-failed","status":"400","server":"[400]: Engine protocol predict request returned 400: {\"error\":{\"code\":400,\"message\":\"logprobs is not supported with tools + stream\"}}"}
+```
+
+Point `localBaseUrl` straight at the model server in that case. The logged `server` text
+is the server's own diagnostic, length-capped and with the prompt scaffolding redacted;
+the rest of the response body is never written to the log.
 
 If the Plugins UI reports `Invalid V2 TUI plugin module`, clear the cached package and reinstall; that error identifies an older V1 revision.
 

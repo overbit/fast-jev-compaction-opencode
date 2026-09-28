@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { JevClient } from '../src/client.js';
-import { LocalJevAsker, buildLocalRequest } from '../src/local.js';
+import { LocalJevAsker, buildLocalRequest, decisionPrompt, parseLocalResponse } from '../src/local.js';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -62,6 +62,56 @@ describe('local backend', () => {
       { keep: { type: 'noul', instructions: 'keep?' } },
     );
     expect(response.answers.keep && 'noul' in response.answers.keep ? response.answers.keep.noul : 0).toBeGreaterThan(0.8);
+  });
+
+  describe('refusals', () => {
+    it('reads a 200 error envelope as a refusal, not a malformed response', () => {
+      // LM Studio's router answers an unknown route with 200 and this body.
+      expect(() =>
+        parseLocalResponse(
+          200,
+          true,
+          JSON.stringify({ error: 'Unexpected endpoint or method. (POST /chat/completions)' }),
+          2,
+        ),
+      ).toThrow(/error envelope \(200\) server: Unexpected endpoint or method/);
+    });
+
+    it('reads a nested OpenAI-style error object', () => {
+      expect(() =>
+        parseLocalResponse(
+          400,
+          false,
+          JSON.stringify({ error: { message: 'logprobs is not supported with tools + stream' } }),
+          2,
+        ),
+      ).toThrow(/request failed \(400\) server: logprobs is not supported/);
+    });
+
+    it('still reports malformed JSON when the body is not JSON at all', () => {
+      expect(() => parseLocalResponse(200, true, '<html>hi</html>', 2)).toThrow(
+        'local classifier returned malformed JSON',
+      );
+    });
+
+    it('redacts the prompt scaffolding a server echoes back', () => {
+    const echoed = JSON.stringify({
+      error: { message: `bad request, prompt was: ${decisionPrompt({ context: 'a secret plan' }, 'keep?', ['yes', 'no'])}` },
+    });
+
+    expect(() => parseLocalResponse(400, false, echoed, 2)).toThrow(/server: bad request, prompt was: \[prompt omitted\]/);
+    try {
+      parseLocalResponse(400, false, echoed, 2);
+    } catch (e) {
+      expect(String(e)).not.toContain('a secret plan');
+    }
+  });
+
+  it('keeps a non-JSON failure body in the message', () => {
+      expect(() => parseLocalResponse(502, false, '<html>bad gateway</html>', 2)).toThrow(
+        /request failed \(502\): <html>bad gateway<\/html>/,
+      );
+    });
   });
 
   it('sends a bearer token only when one is configured', () => {

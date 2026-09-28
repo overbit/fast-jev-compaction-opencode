@@ -84,6 +84,60 @@ function isContextOverflow(text: string): boolean {
   return /context length|context window|context overflow/i.test(text);
 }
 
+/** Longest server-supplied diagnostic kept, so a log line stays readable. */
+const SERVER_MESSAGE_LIMIT = 160;
+
+/**
+ * Pull the server's own diagnostic out of a response body.
+ *
+ * OpenAI-compatible servers refuse a bad route, model or request with an
+ * `error` envelope rather than a bare status, and they often pair it with a
+ * 200 (LM Studio's router does). The envelope's message is the only part that
+ * names the cause, and status alone points at the wrong suspect. It is a
+ * server diagnostic rather than transcript content, but the length cap and
+ * whitespace collapse are what keep that safe to log.
+ */
+function serverErrorMessage(body: unknown): string | undefined {
+  if (!body || typeof body !== 'object') return undefined;
+  const record = body as Record<string, unknown>;
+  const error = record.error;
+  const raw =
+    typeof error === 'string'
+      ? error
+      : ((error && typeof error === 'object'
+          ? (error as Record<string, unknown>).message
+          : undefined) as string | undefined) ??
+        (typeof record.message === 'string' ? record.message : undefined) ??
+        (typeof record.detail === 'string' ? record.detail : undefined);
+  if (typeof raw !== 'string') return undefined;
+  // Redact before collapsing: HEADER contains newlines, which collapsing would
+  // destroy, and then the split would no longer match.
+  const flat = redactPrompt(raw).replace(/\s+/g, ' ').trim();
+  return flat === '' ? undefined : flat.slice(0, SERVER_MESSAGE_LIMIT);
+}
+
+/**
+ * Remove the plugin's own prompt scaffolding from a server diagnostic.
+ *
+ * A server may quote the request back in an error message, and the prompt is
+ * built from the transcript, so an unredacted diagnostic can carry conversation
+ * content to the log. This removes the fixed scaffolding, which is the part the
+ * server is most likely to echo verbatim.
+ *
+ * This is a mitigation, not a guarantee: a server that echoes the `[State]` or
+ * `[Question]` body of the prompt could still carry transcript text, and the
+ * length cap only bounds how much. Set `logFile` to a path you trust, or unset
+ * it, if that trade is unacceptable.
+ */
+function redactPrompt(text: string): string {
+  return text.split(HEADER)[0] + (text.includes(HEADER) ? '[prompt omitted]' : '');
+}
+
+function hasChoices(body: unknown): boolean {
+  const choices = (body as { choices?: unknown } | null | undefined)?.choices;
+  return Array.isArray(choices) && choices.length > 0;
+}
+
 /**
  * Reads the decision distribution from an LM Studio chat completion: the
  * log-probs of the option letters at the first generated position,
@@ -97,17 +151,29 @@ export function parseLocalResponse(
   text: string,
   optionCount: number,
 ): LocalDecision {
-  if (!ok) {
-    if (isContextOverflow(text)) {
-      throw new Error(`local classifier context overflow (${status}): ${text.slice(0, 200)}`);
-    }
-    throw new Error(`local classifier request failed (${status}): ${text.slice(0, 200)}`);
-  }
+  // Parse first: a server can signal refusal in the body even on a 200, so the
+  // status alone does not say whether the request succeeded.
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
+    parsed = undefined;
+  }
+  const serverMessage = serverErrorMessage(parsed);
+
+  if (!ok) {
+    const detail = serverMessage ?? text.slice(0, 200);
+    const suffix = serverMessage ? ` server: ${serverMessage}` : `: ${detail}`;
+    if (isContextOverflow(text)) {
+      throw new Error(`local classifier context overflow (${status})${suffix}`);
+    }
+    throw new Error(`local classifier request failed (${status})${suffix}`);
+  }
+  if (parsed === undefined) {
     throw new Error('local classifier returned malformed JSON');
+  }
+  if (serverMessage !== undefined && !hasChoices(parsed)) {
+    throw new Error(`local classifier got an error envelope (${status}) server: ${serverMessage}`);
   }
   const body = parsed as {
     choices?: Array<{ logprobs?: { content?: Array<{ top_logprobs?: unknown }> | null } | null }>;

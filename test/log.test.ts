@@ -69,4 +69,32 @@ describe('file logger', () => {
     });
     expect(JSON.stringify(summary)).not.toContain('prompt echoed');
   });
+
+  it('carries the server diagnostic, which is what names the cause', () => {
+    const summary = errorSummary(
+      new Error(
+        'local classifier request failed (400) server: logprobs is not supported with tools + stream',
+      ),
+    );
+
+    expect(summary).toEqual({
+      errorName: 'Error',
+      reason: 'http-request-failed',
+      status: '400',
+      server: 'logprobs is not supported with tools + stream',
+    });
+  });
+
+  it('classifies a 200 error envelope as a refusal rather than a failed request', () => {
+    const summary = errorSummary(
+      new Error('local classifier got an error envelope (200) server: Unexpected endpoint or method.'),
+    );
+
+    expect(summary).toEqual({
+      errorName: 'Error',
+      reason: 'server-error-envelope',
+      status: '200',
+      server: 'Unexpected endpoint or method.',
+    });
+  });
 });
