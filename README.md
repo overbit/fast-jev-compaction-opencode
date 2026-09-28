@@ -52,15 +52,52 @@ OpenCode V2 uses the `plugins` config key and object-form options:
 Defaults:
 
 - endpoint: `http://127.0.0.1:1234/v1`
-- model: `jev-style-0.8b-decision-v3`
+- model: `jev-style-qwen3.5-2b-decision-mlx`
 - concurrency: `2`
 - local context ceiling: `64000`
+
+The current LM Studio adapter uses the older Jev-Style Qwen3.5 2B decision model because it
+exposes the next-token `top_logprobs` that this plugin reads. The newer Jev-Style v3
+0.8B/2B releases use their own scoring runtime; the model author explicitly notes that
+stock LM Studio can load those weights but cannot produce the v3 decision scores. Do not
+set `localModel` to a v3 checkpoint with this backend unless a future LM Studio/runtime
+exposes the required scoring protocol.
+
+References:
+
+- [Jev-Style runtime and model compatibility](https://github.com/lawrence3699/jev-style)
+- [Jev-Style Qwen3.5 2B v1 GGUF](https://huggingface.co/chaoliangUNSW/Jev-Style-Qwen3.5-2B-Decision-GGUF)
+- [local LM Studio reference implementation](https://github.com/lkntfnd/fast-jev-compaction-local)
+
+#### Minimum machine requirements
+
+The model is small by current LLM standards, but the loaded context also consumes memory.
+Published v1 GGUF weight sizes are about **1.3 GB (Q4_K_M)**, **2.1 GB (Q8_0)** and
+**3.9 GB (BF16)**. The figures below are conservative deployment guidance for this plugin,
+not official hardware guarantees from the model author:
+
+| Setup | Practical minimum | Suggested plugin settings |
+| --- | --- | --- |
+| CPU-only / low-memory laptop | 8 GB system RAM, modern 4-core CPU, Q4_K_M | `localConcurrency: 1`, `localContextTokens: 8000-16000` |
+| Small discrete GPU | 4 GB VRAM + 8 GB system RAM, Q4_K_M | `localConcurrency: 1`, `localContextTokens: 16000` |
+| Recommended general setup | 16 GB RAM/unified memory or 8 GB+ VRAM | `localConcurrency: 2`, `localContextTokens: 32000-64000` |
+| Apple Silicon | M1 or newer; 16 GB unified memory recommended | MLX build in LM Studio, `localConcurrency: 2` |
+
+A GPU is **not required**. CPU inference works, but compaction can be noticeably slower
+because fast-JEV may make two classifier decisions for each eligible completed tool call.
+For the default `64000` context ceiling, use substantially more memory than the model
+weights alone require; on an 8 GB machine, lower `localContextTokens` first.
+
+`localContextTokens` is only the plugin-side safety ceiling. It must be no higher than
+the context length actually loaded in LM Studio. If LM Studio is configured for 16K,
+set the plugin to `16000` (or slightly below) instead of leaving the 64K default.
 
 The classifier needs `logprobs` with `top_logprobs`, because it decides by reading the
 probability distribution over the option letters. A model that answers in
 `reasoning_content` instead returns `logprobs: null` and cannot drive it, regardless of
-endpoint or authentication; set `localModel` to a checkpoint that emits `top_logprobs`.
-If compaction falls back on every run, check the `reason` in the log first.
+endpoint or authentication. The documented 2B v1 model above is the supported default for
+this LM Studio adapter. If compaction falls back on every run, check the `reason` in the
+log first.
 
 Override the endpoint/model when needed:
 
@@ -163,7 +200,7 @@ OpenCode V2 currently accepts a compaction result as a summary string, not an ar
 | `model` | `jev-latest` | TypeSafe JEV model |
 | `baseUrl` | TypeSafe System One | Remote TypeSafe endpoint |
 | `localBaseUrl` | `http://127.0.0.1:1234/v1` | OpenAI-compatible local endpoint |
-| `localModel` | `jev-style-0.8b-decision-v3` | Local model id |
+| `localModel` | `jev-style-qwen3.5-2b-decision-mlx` | Local model id |
 | `localApiKey` | none | Bearer token for `localBaseUrl`; needed when a proxy fronts the model |
 
 `localBaseUrl` must include the OpenAI-compatible path prefix (`/v1` for LM Studio).
@@ -186,7 +223,7 @@ Diagnostics go to `~/.local/share/opencode/log/fast-jev-compaction.log` (overrid
 only place these appear. Successful server load prints the resolved configuration:
 
 ```text
-2026-09-28T13:36:39.605Z [INFO] [fast-jev-compaction-opencode] initialized {"backend":"local","endpoint":"http://127.0.0.1:1234/v1","model":"jev-style-0.8b-decision-v3","apiKey":"none","preserveRecentMessages":6}
+2026-09-28T13:36:39.605Z [INFO] [fast-jev-compaction-opencode] initialized {"backend":"local","endpoint":"http://127.0.0.1:1234/v1","model":"jev-style-qwen3.5-2b-decision-mlx","apiKey":"none","preserveRecentMessages":6}
 ```
 
 A local request is only necessary when there is at least one **completed tool call outside
