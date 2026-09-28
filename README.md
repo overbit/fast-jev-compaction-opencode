@@ -200,21 +200,21 @@ OpenCode V2 currently accepts a compaction result as a summary string, not an ar
 | `model` | `jev-latest` | TypeSafe JEV model |
 | `baseUrl` | TypeSafe System One | Remote TypeSafe endpoint |
 | `localBaseUrl` | `http://127.0.0.1:1234/v1` | OpenAI-compatible local endpoint |
-| `localModel` | `jev-style-qwen3.5-2b-decision-mlx` | Local model id |
+| `localModel` | `jev-style-qwen3.5-2b-decision-mlx` | LM Studio-compatible Jev-Style Qwen3.5 2B v1 model id |
 | `localApiKey` | none | Bearer token for `localBaseUrl`; needed when a proxy fronts the model |
-
-`localBaseUrl` must include the OpenAI-compatible path prefix (`/v1` for LM Studio).
-Omitting it is the most common misconfiguration, and it fails quietly: LM Studio's
-router answers the unknown route with `200` and an error envelope, so the failure
-surfaces as a classifier refusal rather than a bad-config error.
 | `localConcurrency` | `2` | Parallel local decisions |
-| `localContextTokens` | `64000` | Local decision prompt ceiling |
+| `localContextTokens` | `64000` | Local decision prompt ceiling; must not exceed the context loaded in LM Studio |
 | `keepThreshold` | `0.5` | Minimum probability to keep a call/result |
 | `preserveRecentMessages` | `6` | Newest adapted messages never pruned |
 | `maxStateTokens` | `25000` | JEV state ceiling |
 | `maxRequestTokens` | `30000` | Remote request ceiling |
 | `truncateHeadChars` | `300` | Head retained when only a result is dropped |
 | `minReductionRatio` | `0.25` | Fall back to normal OpenCode compaction below this reduction |
+
+`localBaseUrl` must include the OpenAI-compatible path prefix (`/v1` for LM Studio).
+Omitting it is the most common misconfiguration, and it fails quietly: LM Studio's
+router answers the unknown route with `200` and an error envelope, so the failure
+surfaces as a classifier refusal rather than a bad-config error.
 
 ## Troubleshooting
 
