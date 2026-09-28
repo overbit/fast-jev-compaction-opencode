@@ -55,6 +55,8 @@ export interface FastJevConfig extends CompactOptions {
   baseUrl?: string;
   localModel?: string;
   localBaseUrl?: string;
+  /** Bearer token for `localBaseUrl`; needed when a proxy fronts the model. */
+  localApiKey?: string;
   logFile?: string;
   localConcurrency: number;
   localContextTokens: number;
@@ -98,7 +100,16 @@ export function resolveConfig(options: PluginOptions = {}): FastJevConfig {
     if (typeof value === 'number' && Number.isFinite(value)) config[key] = value;
   }
 
-  for (const key of ['apiKey', 'model', 'baseUrl', 'localModel', 'localBaseUrl', 'logFile', 'goal'] as const) {
+  for (const key of [
+    'apiKey',
+    'model',
+    'baseUrl',
+    'localModel',
+    'localBaseUrl',
+    'localApiKey',
+    'logFile',
+    'goal',
+  ] as const) {
     const value = stringOption(options, key);
     if (value) config[key] = value;
   }
@@ -251,6 +262,7 @@ function createAsker(config: FastJevConfig, logger: Logger): JevAsker {
     return new LocalJevAsker({
       baseUrl: config.localBaseUrl,
       model: config.localModel,
+      apiKey: config.localApiKey,
       concurrency: config.localConcurrency,
       contextTokens: config.localContextTokens,
       onDecision: (name, probability) => {
@@ -324,6 +336,8 @@ export const FastJevCompaction = Plugin.define({
         ? {
             endpoint: safeUrl(config.localBaseUrl ?? LOCAL_BASE_URL),
             model: config.localModel ?? LOCAL_MODEL,
+            // Whether a bearer token is sent, never the token itself.
+            apiKey: config.localApiKey ? 'set' : 'none',
           }
         : {};
 

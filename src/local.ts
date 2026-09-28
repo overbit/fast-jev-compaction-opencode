@@ -47,15 +47,22 @@ export function noulOptions(question: NoulQuestion): [string, string] {
   return [question.criteria?.true ?? 'yes', question.criteria?.false ?? 'no'];
 }
 
-/** The LM Studio chat completion for one decision: one token, with its candidates' log-probs. */
+/**
+ * The LM Studio chat completion for one decision: one token, with its
+ * candidates' log-probs. `apiKey` adds a bearer token, for an OpenAI-compatible
+ * endpoint that fronts LM Studio behind a proxy that authenticates.
+ */
 export function buildLocalRequest(
-  params: { baseUrl?: string; model?: string },
+  params: { baseUrl?: string; model?: string; apiKey?: string },
   prompt: string,
 ): JevRequest {
+  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  if (params.apiKey) headers.authorization = `Bearer ${params.apiKey}`;
+
   return {
     url: `${(params.baseUrl ?? LOCAL_BASE_URL).replace(/\/+$/, '')}/chat/completions`,
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers,
     body: JSON.stringify({
       model: params.model ?? LOCAL_MODEL,
       messages: [{ role: 'user', content: prompt }],
@@ -236,6 +243,8 @@ export interface LocalJevAskerOptions {
   signal?: AbortSignal;
   /** Estimated token ceiling for one prompt. Default 64000. */
   contextTokens?: number;
+  /** Sent as `Authorization: Bearer` when set; for a proxy that authenticates. */
+  apiKey?: string;
   /** Called once for each successfully parsed decision. */
   onDecision?: (name: string, probability: number) => void;
   /** The transport: `fetchText` (global `fetch`) or a host's, like `$.http.fetch`. */
@@ -274,6 +283,8 @@ export class LocalJevAsker implements JevAsker {
   readonly model: string;
   readonly concurrency: number;
   readonly contextTokens: number;
+  /** The bearer token sent on every request, or undefined when unauthenticated. */
+  readonly apiKey: string | undefined;
   private readonly fetcher: LocalFetch;
   private readonly schedule: Scheduler;
   private readonly priority: Priority;
@@ -286,6 +297,7 @@ export class LocalJevAsker implements JevAsker {
     this.model = options.model ?? LOCAL_MODEL;
     this.concurrency = Math.max(1, Math.floor(options.concurrency ?? LOCAL_CONCURRENCY));
     this.contextTokens = options.contextTokens ?? LOCAL_CONTEXT_TOKENS;
+    this.apiKey = options.apiKey;
     if (!(this.contextTokens > 0)) {
       throw new Error(`local classifier contextTokens must be positive (got ${this.contextTokens})`);
     }
@@ -392,7 +404,10 @@ export class LocalJevAsker implements JevAsker {
         `local classifier context overflow: prompt ~${tokens} tokens exceeds ${this.contextTokens}`,
       );
     }
-    const request = buildLocalRequest({ baseUrl: this.baseUrl, model: this.model }, prompt);
+    const request = buildLocalRequest(
+      { baseUrl: this.baseUrl, model: this.model, apiKey: this.apiKey },
+      prompt,
+    );
     let response: LocalFetchResponse;
     try {
       response = await this.fetcher(request.url, {

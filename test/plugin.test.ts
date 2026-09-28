@@ -28,6 +28,12 @@ describe('resolveConfig', () => {
     expect(config.localConcurrency).toBe(4);
     expect(config.logFile).toBe('/tmp/jev.log');
   });
+
+  it('carries a local bearer token without conflating it with the TypeSafe key', () => {
+    const config = resolveConfig({ backend: 'local', localApiKey: 'sk-proxy', apiKey: 'sk-typesafe' });
+    expect(config.localApiKey).toBe('sk-proxy');
+    expect(config.apiKey).toBe('sk-typesafe');
+  });
 });
 
 describe('OpenCode V2 adapter', () => {
@@ -89,7 +95,7 @@ describe('OpenCode V2 adapter', () => {
     const logDirectory = mkdtempSync(join(tmpdir(), 'fast-jev-plugin-test-'));
     temporaryDirectories.push(logDirectory);
     const logFile = join(logDirectory, 'plugin.log');
-    const fetchMock = vi.fn(async () =>
+    const fetchMock = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) =>
       new Response(
         JSON.stringify({
           choices: [
@@ -119,6 +125,7 @@ describe('OpenCode V2 adapter', () => {
         backend: 'local',
         preserveRecentMessages: 0,
         minReductionRatio: 0,
+        localApiKey: 'sk-test-key',
         logFile,
       },
       session: {
@@ -138,6 +145,9 @@ describe('OpenCode V2 adapter', () => {
     await compactionHook!(event);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const call of fetchMock.mock.calls) {
+      expect((call[1]?.headers as Record<string, string>).authorization).toBe('Bearer sk-test-key');
+    }
     expect(event.result).toMatchObject({
       metadata: {
         plugin: 'fast-jev-compaction-opencode',
@@ -151,6 +161,8 @@ describe('OpenCode V2 adapter', () => {
 
     const log = readFileSync(logFile, 'utf8');
     expect(log).toContain('"backend":"local"');
+    expect(log).toContain('"apiKey":"set"');
+    expect(log).not.toContain('sk-test-key');
     expect(log).toContain('"parts":{"text":2,"tool-call":1,"tool-result":1}');
     expect(log).toContain('"candidates":1');
     expect(log).toContain('"question":"call_t1"');

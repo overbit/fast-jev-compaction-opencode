@@ -74,6 +74,30 @@ Override the endpoint/model when needed:
 }
 ```
 
+`localBaseUrl` must include the OpenAI-compatible path prefix (`/v1` for LM Studio). A
+proxy that authenticates also needs `localApiKey`, which is sent as
+`Authorization: Bearer`:
+
+```jsonc
+{
+  "plugins": [
+    {
+      "package": "github:overbit/fast-jev-compaction-opencode",
+      "options": {
+        "backend": "local",
+        "localBaseUrl": "http://127.0.0.1:20128/v1",
+        "localModel": "lm-studio/jev-style-qwen3.5-2b-decision",
+        "localApiKey": "{env:OMNIROUTE_API_KEY}"
+      }
+    }
+  ]
+}
+```
+
+`localApiKey` is separate from the TypeSafe `apiKey` so a TypeSafe credential is never
+sent to a local endpoint or proxy. It is never written to the plugin log; the
+`initialized` line reports only `apiKey: set` or `apiKey: none`.
+
 ## Updating from the earlier V1 build
 
 Earlier revisions of this repository used the OpenCode V1 package `@opencode-ai/plugin`. OpenCode 2 rejects that module shape.
@@ -129,6 +153,7 @@ OpenCode V2 currently accepts a compaction result as a summary string, not an ar
 | `baseUrl` | TypeSafe System One | Remote TypeSafe endpoint |
 | `localBaseUrl` | `http://127.0.0.1:1234/v1` | OpenAI-compatible local endpoint |
 | `localModel` | `jev-style-qwen3.5-2b-decision-mlx` | Local model id |
+| `localApiKey` | none | Bearer token for `localBaseUrl`; needed when a proxy fronts the model |
 | `localConcurrency` | `2` | Parallel local decisions |
 | `localContextTokens` | `64000` | Local decision prompt ceiling |
 | `keepThreshold` | `0.5` | Minimum probability to keep a call/result |

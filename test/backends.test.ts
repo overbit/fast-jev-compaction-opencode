@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { JevClient } from '../src/client.js';
-import { LocalJevAsker } from '../src/local.js';
+import { LocalJevAsker, buildLocalRequest } from '../src/local.js';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -62,5 +62,41 @@ describe('local backend', () => {
       { keep: { type: 'noul', instructions: 'keep?' } },
     );
     expect(response.answers.keep && 'noul' in response.answers.keep ? response.answers.keep.noul : 0).toBeGreaterThan(0.8);
+  });
+
+  it('sends a bearer token only when one is configured', () => {
+    const withKey = buildLocalRequest({ apiKey: 'sk-local' }, 'hi');
+    expect(withKey.headers.authorization).toBe('Bearer sk-local');
+
+    const withoutKey = buildLocalRequest({}, 'hi');
+    expect(withoutKey.headers.authorization).toBeUndefined();
+  });
+
+  it('sends the configured bearer token through the asker transport', async () => {
+    const seen: Record<string, string>[] = [];
+    const asker = new LocalJevAsker({
+      apiKey: 'sk-proxy',
+      concurrency: 1,
+      fetch: async (_url, init) => {
+        seen.push(init.headers);
+        return {
+          status: 200,
+          ok: true,
+          text: JSON.stringify({
+            choices: [
+              { logprobs: { content: [{ top_logprobs: [{ token: 'A', logprob: -0.1 }, { token: 'B', logprob: -2 }] }] } },
+            ],
+          }),
+        };
+      },
+    });
+
+    await asker.ask(
+      { context: 'ctx', goal: 'ship', history: [] },
+      { keep: { type: 'noul', instructions: 'keep?' } },
+    );
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.authorization).toBe('Bearer sk-proxy');
   });
 });
