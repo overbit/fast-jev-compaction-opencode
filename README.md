@@ -1,14 +1,105 @@
 # fast-jev-compaction-opencode
 
-Fast JEV compaction for OpenCode V2.
+[![CI](https://github.com/overbit/fast-jev-compaction-opencode/actions/workflows/ci.yml/badge.svg)](https://github.com/overbit/fast-jev-compaction-opencode/actions/workflows/ci.yml)
+[![OpenCode](https://img.shields.io/badge/OpenCode-v2-111827)](https://opencode.ai/)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-This ports [tamaratran/fast-jev-compaction](https://github.com/tamaratran/fast-jev-compaction) to the OpenCode V2 plugin API using an OpenAI-compatible local backend approach.
+**JEV-guided context compaction for OpenCode V2.**
 
-Instead of asking a model to rewrite old context, the plugin asks JEV which completed tool calls/results are still needed. Retained user/assistant text and retained tool output are carried into the checkpoint without a model-generated summary.
+Instead of asking a generative model to rewrite old conversation history into a summary,
+this plugin asks a decision model which completed tool calls and outputs are still useful.
 
-## Install
+**Keep what matters. Drop what can be re-read or re-run.**
 
-Install the package with OpenCode V2:
+This project ports the core approach from
+[tamaratran/fast-jev-compaction](https://github.com/tamaratran/fast-jev-compaction)
+to the OpenCode V2 plugin API, with hosted JEV and a working local LM Studio backend.
+
+> Status: experimental. The compaction strategy is intentionally conservative and falls
+> back to OpenCode's native compaction when classification fails or the reduction is too
+> small to justify an override.
+
+## Why this exists
+
+Coding agents accumulate a lot of context that is useful briefly and expensive later:
+source reads, searches, test output, build logs, directory listings, diffs, and other tool
+results.
+
+Traditional compaction asks an LLM to rewrite that history into a shorter summary. That
+can work well, but rewriting introduces a different failure mode: exact paths, commands,
+constraints, errors, or other details may be shortened, merged, or omitted.
+
+fast-jev-compaction takes a narrower approach:
+
+- **classify instead of summarize** — JEV decides whether old tool history still matters;
+- **preserve retained text** — retained user/assistant text and retained tool output are
+  copied into the checkpoint rather than rewritten by another model;
+- **protect recent work** — the newest messages are pinned by default;
+- **fail open** — classifier errors or weak reductions fall back to native OpenCode
+  compaction;
+- **run hosted or local** — use TypeSafe JEV or an OpenAI-compatible local decision model.
+
+The plugin is most useful for long, tool-heavy coding sessions. If a session contains few
+completed tool calls, there may be little or nothing for JEV to remove.
+
+## How it works
+
+```text
+OpenCode session
+      │
+      ▼
+pair completed tool calls + results
+      │
+      ▼
+protect first + recent messages
+      │
+      ▼
+build compact JEV state
+      │
+      ▼
+ask: keep call? keep full result?
+      │
+      ▼
+ keep │ truncate result │ drop call + result
+      │
+      ▼
+deterministic checkpoint
+      │
+      └── classifier failure / weak reduction ──► native OpenCode compaction
+```
+
+For every eligible completed tool call, JEV receives two yes/no (`noul`) questions:
+
+```text
+Tool call t1 (read) should stay in the history:
+knowing this call was made, with its input, still matters
+for what the assistant does next
+```
+
+```text
+The full output of tool call t1 (read, 8421 chars)
+should stay in the history verbatim:
+the assistant still needs its contents and re-running
+the tool would not do
+```
+
+With the default `keepThreshold: 0.5`:
+
+| Decision | Result |
+| --- | --- |
+| full result probability >= threshold | keep call + full result |
+| call probability >= threshold | keep call + truncate result |
+| both below threshold | remove call + result |
+| call is pinned | always keep |
+
+The classifier sees the surrounding conversation and the tool call/input, but large tool
+outputs are replaced in the JEV state with notes such as `ok, 8421 chars (omitted)`.
+This keeps the decision prompt bounded while still giving the model the context needed to
+judge whether the result is likely to matter later.
+
+## Quick start
+
+### 1. Install
 
 ```sh
 opencode plugin add github:overbit/fast-jev-compaction-opencode
@@ -16,14 +107,14 @@ opencode plugin add github:overbit/fast-jev-compaction-opencode
 
 The package exposes:
 
-- the server plugin at the package root / `./server`;
-- the CLI companion at `./tui`, so it appears in OpenCode's Plugins UI.
+- `./server` — the OpenCode V2 compaction plugin;
+- `./tui` — a lightweight companion so the package appears in OpenCode's Plugins UI.
 
-Because the repository is private, Git on the machine running OpenCode must already have credentials that can read `overbit/fast-jev-compaction-opencode`.
+### 2. Choose a backend
 
-### TypeSafe JEV
+#### Hosted JEV — simplest setup
 
-TypeSafe is the default backend:
+TypeSafe JEV is the default backend:
 
 ```sh
 export TYPESAFE_API_KEY=...
@@ -31,94 +122,10 @@ export TYPESAFE_API_KEY=...
 
 No plugin options are required.
 
-### Local model
+#### Local LM Studio — supported today
 
-The recommended small local model is
-[`chaoliangUNSW/Jev-Style-0.8B-Decision-v3-GGUF`](https://huggingface.co/chaoliangUNSW/Jev-Style-0.8B-Decision-v3-GGUF).
-
-It is a 0.8B Qwen3.5 decision model with these published GGUF sizes:
-
-| Quantization | Model file | Notes |
-| --- | ---: | --- |
-| Q4_K_M | 0.53 GB | Recommended minimum-memory build |
-| Q8_0 | 0.81 GB | More precision with a still-small footprint |
-| F16 | 1.52 GB | Full-precision GGUF reference |
-
-The v3 runtime supports up to **25,600 input tokens per decision** and opens a
-**32,768-token context** to leave room for the question/options/readout.
-
-#### Important: v3 needs its scoring runtime
-
-The v3 model is not a normal chat classifier. Its decisions are read from dedicated
-verdict slots. Stock LM Studio, Ollama, llama.cpp chat generation, or
-`mlx_lm.generate` can load the weights, but ordinary text generation does not expose
-the decision scores the plugin needs.
-
-Use the model author's `jev-style` / bundled `jev-score` runtime for v3:
-
-```sh
-# CPU / CUDA / Linux / Windows
-pip install "jev-style[torch]"
-
-# Apple silicon
-pip install "jev-style[mlx]"
-
-# Download and serve the default 0.8B v3 release
-jev-style serve
-```
-
-The model server exposes a System One-compatible API, normally at
-`http://127.0.0.1:8765/v1/systemone`.
-
-> **Current plugin compatibility:** the plugin's `backend: "local"` path still uses
-> OpenAI `/chat/completions + top_logprobs`, so it is compatible with the older
-> Jev-Style Qwen3.5 2B v1 model, not the v3 scorer above. Do not point the existing
-> LM Studio backend at the v3 GGUF and expect valid decisions. The v3 model is documented
-> here as the preferred model/runtime direction; until the plugin has a direct
-> System One local backend, use the legacy LM Studio setup below for working local
-> compaction.
-
-References:
-
-- [Jev-Style 0.8B v3 GGUF model card](https://huggingface.co/chaoliangUNSW/Jev-Style-0.8B-Decision-v3-GGUF)
-- [Jev-Style runtime](https://github.com/lawrence3699/jev-style)
-- [LM Studio-compatible 2B reference implementation](https://github.com/lkntfnd/fast-jev-compaction-local)
-
-#### Machine requirements for the 0.8B v3 GGUF
-
-A GPU is **not required**. The model author supports CPU execution, Apple Silicon/MLX,
-CUDA and the bundled llama.cpp scorer. The table below is practical deployment guidance
-for running the classifier alongside OpenCode; it is intentionally more conservative than
-the raw model-file size.
-
-| Setup | Practical minimum | Recommended settings / notes |
-| --- | --- | --- |
-| CPU-only | 4-core 64-bit CPU, **4 GB free RAM**, Q4_K_M | Suitable for shorter states; expect higher compaction latency |
-| General laptop / desktop | **8 GB RAM**, Q4_K_M or Q8_0 | Good baseline when the main coding model is remote |
-| Apple Silicon | M1 or newer, **8 GB unified memory** | 16 GB recommended if OpenCode and other developer tools are active |
-| Discrete GPU | **2 GB VRAM** for the model; **4 GB+ VRAM recommended** | Keep enough headroom for KV/cache and runtime allocations |
-| Comfortable full-context setup | **16 GB system/unified RAM** or **4-8 GB+ VRAM** | Best target for long 20K-25.6K decision states |
-
-The **4 GB** figure is a practical floor, not a guarantee for every OS/runtime combination.
-The 0.53 GB Q4 weights are only part of memory use: the Python/runtime process, tokenizer,
-KV/cache, OpenCode itself and the loaded decision context all consume additional memory.
-
-If the machine is memory constrained, reduce the compaction state/request limits rather
-than relying on the model's full 25.6K input capacity. If the main coding LLM is also
-running locally, add its memory requirements on top of these numbers.
-
-#### Legacy LM Studio backend
-
-The currently implemented `backend: "local"` uses an OpenAI-compatible
-`/chat/completions` endpoint and reads `top_logprobs`. Its supported default remains the
-older LM Studio-compatible 2B v1 decision model:
-
-- endpoint: `http://127.0.0.1:1234/v1`
-- model: `jev-style-qwen3.5-2b-decision-mlx`
-- concurrency: `2`
-- local context ceiling: `64000`
-
-Configure it with:
+The working local backend uses an OpenAI-compatible
+`/chat/completions + top_logprobs` endpoint.
 
 ```jsonc
 {
@@ -134,13 +141,100 @@ Configure it with:
 }
 ```
 
-For that older 2B model, a practical baseline is **8 GB system RAM** with Q4 and
-`localConcurrency: 1`; **16 GB RAM/unified memory or 8 GB+ VRAM** is the recommended
-target for larger contexts and concurrency 2.
+Defaults:
 
-The classifier needs `logprobs` with `top_logprobs`, because it decides by reading the
-probability distribution over option letters. A model that answers in
-`reasoning_content` and returns `logprobs: null` cannot drive this backend.
+- endpoint: `http://127.0.0.1:1234/v1`
+- model: `jev-style-qwen3.5-2b-decision-mlx`
+- concurrency: `2`
+- local context ceiling: `64000`
+
+The local model must expose `logprobs` and `top_logprobs`. The plugin reads the
+probability distribution over the decision letters; generated prose alone is not enough.
+
+## Backend compatibility
+
+| Backend | Model / runtime | Status | Notes |
+| --- | --- | --- | --- |
+| TypeSafe | `jev-latest` | **Supported** | Default hosted backend |
+| LM Studio / OpenAI-compatible | Jev-Style Qwen3.5 2B v1 | **Supported** | Uses `/chat/completions + top_logprobs` |
+| Jev-Style runtime | 0.8B Decision v3 | **Not wired directly yet** | Requires the model's dedicated scoring runtime / System One-compatible API |
+
+The newer
+[`chaoliangUNSW/Jev-Style-0.8B-Decision-v3-GGUF`](https://huggingface.co/chaoliangUNSW/Jev-Style-0.8B-Decision-v3-GGUF)
+is attractive for a future direct local backend because it is much smaller, but it does
+not expose its decision scores through ordinary LM Studio/Ollama/chat generation. See
+[Local models](#local-models).
+
+## Design goals
+
+### Non-generative pruning
+
+JEV makes retention decisions. It does not generate a replacement summary of the
+conversation.
+
+### Conservative by default
+
+The first message and the newest `preserveRecentMessages` messages are pinned. The
+default is `6`.
+
+Calls without completed results are never candidates.
+
+### Safe fallback
+
+Nothing is dropped without a classifier answer. If a request fails, unanswered calls
+default to keep. If the overall reduction is below `minReductionRatio`, the plugin
+leaves OpenCode's compaction result untouched so native compaction can run.
+
+### Observable
+
+The plugin writes its own diagnostics file with:
+
+- resolved backend/model;
+- number of adapted messages;
+- completed, pinned, and candidate calls;
+- classifier request/response status;
+- reduction ratio;
+- final override/fallback reason.
+
+Default log:
+
+```text
+~/.local/share/opencode/log/fast-jev-compaction.log
+```
+
+Override it with `logFile`.
+
+## Local models
+
+### Current supported local path: LM Studio + 2B v1
+
+The implemented `backend: "local"` adapter sends one classification prompt per JEV
+question to an OpenAI-compatible chat endpoint.
+
+The request is effectively:
+
+```json
+{
+  "model": "jev-style-qwen3.5-2b-decision-mlx",
+  "messages": [
+    {
+      "role": "user",
+      "content": "[State] ... [Question] ... [Options] A. yes B. no ... Answer:"
+    }
+  ],
+  "temperature": 0,
+  "max_tokens": 2,
+  "logprobs": true,
+  "top_logprobs": 10
+}
+```
+
+The plugin renormalizes the log-probabilities of the answer letters into the JEV
+probability.
+
+For this older 2B model, a practical baseline is **8 GB system RAM** with a quantized
+build and `localConcurrency: 1`. **16 GB RAM/unified memory or 8 GB+ VRAM** is a
+comfortable target for larger contexts and concurrency 2.
 
 Override the endpoint/model when needed:
 
@@ -161,8 +255,8 @@ Override the endpoint/model when needed:
 ```
 
 `localBaseUrl` must include the OpenAI-compatible path prefix (`/v1` for LM Studio).
-A proxy that authenticates also needs `localApiKey`, which is sent as
-`Authorization: Bearer`:
+
+A proxy that authenticates can use a separate local bearer token:
 
 ```jsonc
 {
@@ -180,35 +274,79 @@ A proxy that authenticates also needs `localApiKey`, which is sent as
 }
 ```
 
-The proxy must pass `logprobs` and `top_logprobs` through untouched and must not inject
-tools or force streaming. A router that namespaces model ids (a `provider/model` prefix)
-may interpret that prefix as a provider to authenticate for, so use the bare model id.
+`localApiKey` is intentionally separate from the TypeSafe `apiKey`. The plugin never
+logs the credential itself.
 
-`localApiKey` is separate from the TypeSafe `apiKey`, so a TypeSafe credential is never
-sent to a local endpoint or proxy. It is never written to the plugin log; the
-`initialized` line reports only `apiKey: set` or `apiKey: none`.
+### Jev-Style 0.8B Decision v3
 
-## Updating from the earlier V1 build
+The newer
+[`chaoliangUNSW/Jev-Style-0.8B-Decision-v3-GGUF`](https://huggingface.co/chaoliangUNSW/Jev-Style-0.8B-Decision-v3-GGUF)
+is a 0.8B Qwen3.5 decision model with a substantially smaller footprint:
 
-Earlier revisions of this repository used the OpenCode V1 package `@opencode-ai/plugin`. OpenCode 2 rejects that module shape.
+| Quantization | Model file | Notes |
+| --- | ---: | --- |
+| Q4_K_M | 0.53 GB | smallest practical build |
+| Q8_0 | 0.81 GB | higher precision, still compact |
+| F16 | 1.52 GB | full-precision GGUF reference |
 
-Remove the cached git package once:
+Published runtime limits:
+
+- up to **25,600 input tokens per decision**;
+- **32,768-token runtime context** to leave room for questions/options/readout.
+
+A GPU is not required. Practical guidance for running the classifier alongside OpenCode:
+
+| Setup | Practical starting point |
+| --- | --- |
+| CPU-only | 4-core 64-bit CPU, **4 GB free RAM**, Q4_K_M |
+| General laptop / desktop | **8 GB RAM**, Q4_K_M or Q8_0 |
+| Apple Silicon | M1+, **8 GB unified memory**; 16 GB recommended for a full dev workload |
+| Discrete GPU | **2 GB VRAM minimum**, **4 GB+ recommended** |
+| Long 20K-25.6K states | **16 GB system/unified RAM** or **4-8 GB+ VRAM** |
+
+The weight file is only part of memory use. Runtime state, tokenizer, KV/cache, OpenCode,
+and any locally hosted coding model all need additional memory.
+
+#### Important compatibility note
+
+v3 is not a normal chat classifier. Its decision scores come from dedicated verdict slots.
+
+Stock LM Studio, Ollama, normal llama.cpp chat generation, and `mlx_lm.generate` can
+load the weights, but ordinary generation does not expose the scores required by the v3
+model.
+
+Use the model author's runtime:
 
 ```sh
-rm -rf "${XDG_CACHE_HOME:-$HOME/.cache}/opencode/packages/github:overbit/fast-jev-compaction-opencode"
+# CPU / CUDA / Linux / Windows
+pip install "jev-style[torch]"
+
+# Apple silicon
+pip install "jev-style[mlx]"
+
+jev-style serve
 ```
 
-Then reinstall:
+That server exposes a System One-compatible endpoint, normally:
 
-```sh
-opencode plugin add github:overbit/fast-jev-compaction-opencode
+```text
+http://127.0.0.1:8765/v1/systemone
 ```
 
-If the package is already configured, run the appropriate OpenCode V2 update/re-add command after clearing the cache, then restart the OpenCode service/TUI.
+**The plugin does not yet have a direct local System One backend.** Do not point the
+current `backend: "local"` LM Studio adapter at the v3 model and expect correct
+classification.
 
-## How the V2 integration works
+References:
 
-The server entrypoint is a real OpenCode V2 definition:
+- [Jev-Style 0.8B v3 GGUF](https://huggingface.co/chaoliangUNSW/Jev-Style-0.8B-Decision-v3-GGUF)
+- [Jev-Style runtime](https://github.com/lawrence3699/jev-style)
+- [original fast-jev-compaction](https://github.com/tamaratran/fast-jev-compaction)
+- [LM Studio local reference implementation](https://github.com/lkntfnd/fast-jev-compaction-local)
+
+## OpenCode V2 integration
+
+The server entrypoint is a native OpenCode V2 plugin:
 
 ```ts
 Plugin.define({
@@ -216,7 +354,7 @@ Plugin.define({
   async setup(ctx) {
     await ctx.session.hook("compaction", async (event) => {
       // classify old tool calls/results with JEV
-      // set event.result.summary on a useful reduction
+      // set event.result.summary when the reduction is useful
     })
   }
 })
@@ -224,14 +362,26 @@ Plugin.define({
 
 On a compaction request:
 
-1. OpenCode supplies the transcript through the V2 `compaction` session hook.
-2. The transcript is adapted to the upstream fast-JEV core.
-3. JEV classifies completed tool calls/results.
-4. Calls/results are kept, result-truncated, or removed using the upstream policy.
-5. When the reduction reaches `minReductionRatio`, the plugin sets `event.result.summary` itself, so OpenCode skips its normal summary-model call.
-6. If JEV fails or the reduction is too small, the hook leaves `event.result` unset and OpenCode performs its normal compaction.
+1. OpenCode supplies the transcript to the V2 compaction hook.
+2. The plugin adapts the transcript to the fast-JEV message model.
+3. Completed tool calls are paired with their results.
+4. JEV classifies eligible calls/results.
+5. The plugin rebuilds the retained transcript.
+6. If reduction reaches `minReductionRatio`, the plugin supplies its own checkpoint.
+7. Otherwise OpenCode's normal compaction path remains available.
 
-OpenCode V2 currently accepts a compaction result as a summary string, not an arbitrary replacement message list. The plugin therefore serializes the retained transcript deterministically into the checkpoint rather than asking another model to summarize it.
+### Current OpenCode limitation
+
+OpenCode V2 currently lets a compaction plugin provide a **summary string**, not an
+arbitrary replacement message list.
+
+That means this port cannot yet hand OpenCode the pruned structured messages directly.
+Instead, it serializes the retained transcript deterministically into the compaction
+checkpoint. Retained text is not model-rewritten, but the original message/tool structure
+is flattened into that checkpoint string.
+
+This is the biggest difference between the ideal upstream fast-JEV behavior and what the
+current OpenCode V2 compaction hook can express.
 
 ## Configuration
 
@@ -242,53 +392,30 @@ OpenCode V2 currently accepts a compaction result as a summary string, not an ar
 | `model` | `jev-latest` | TypeSafe JEV model |
 | `baseUrl` | TypeSafe System One | Remote TypeSafe endpoint |
 | `localBaseUrl` | `http://127.0.0.1:1234/v1` | OpenAI-compatible local endpoint |
-| `localModel` | `jev-style-qwen3.5-2b-decision-mlx` | Legacy LM Studio backend model; v3 GGUF requires its dedicated scorer/runtime |
-| `localApiKey` | none | Bearer token for `localBaseUrl`; needed when a proxy fronts the model |
+| `localModel` | `jev-style-qwen3.5-2b-decision-mlx` | Current LM Studio-compatible local model |
+| `localApiKey` | none | Optional bearer token for a proxied local endpoint |
 | `localConcurrency` | `2` | Parallel local decisions |
-| `localContextTokens` | `64000` | Local decision prompt ceiling; must not exceed the context loaded in LM Studio |
-| `keepThreshold` | `0.5` | Minimum probability to keep a call/result |
-| `preserveRecentMessages` | `6` | Newest adapted messages never pruned |
+| `localContextTokens` | `64000` | Local prompt safety ceiling; must not exceed the context loaded in the server |
+| `keepThreshold` | `0.5` | Minimum probability to retain a call/result |
+| `preserveRecentMessages` | `6` | Newest adapted messages that are always pinned |
 | `maxStateTokens` | `25000` | JEV state ceiling |
 | `maxRequestTokens` | `30000` | Remote request ceiling |
-| `truncateHeadChars` | `300` | Head retained when only a result is dropped |
-| `minReductionRatio` | `0.25` | Fall back to normal OpenCode compaction below this reduction |
-
-`localBaseUrl` must include the OpenAI-compatible path prefix (`/v1` for LM Studio).
-Omitting it is the most common misconfiguration, and it fails quietly: LM Studio's
-router answers the unknown route with `200` and an error envelope, so the failure
-surfaces as a classifier refusal rather than a bad-config error.
+| `truncateHeadChars` | `300` | Characters retained when only a result is dropped |
+| `minReductionRatio` | `0.25` | Fall back to native compaction below this reduction |
+| `logFile` | OpenCode data log path | Override diagnostics file |
 
 ## Troubleshooting
 
-Diagnostics go to `~/.local/share/opencode/log/fast-jev-compaction.log` (override with
-`logFile`). Plugin `console` output is not captured by OpenCode, so the log file is the
-only place these appear. Successful server load prints the resolved configuration:
+<details>
+<summary><strong>/compact does not contact the local model</strong></summary>
 
-```text
-2026-09-28T13:36:39.605Z [INFO] [fast-jev-compaction-opencode] initialized {"backend":"local","endpoint":"http://127.0.0.1:1234/v1","model":"jev-style-qwen3.5-2b-decision-mlx","apiKey":"none","preserveRecentMessages":6}
-```
+A request is only necessary when there is at least one **completed tool call outside the
+pinned recent-message window**.
 
-A local request is only necessary when there is at least one **completed tool call outside
-the pinned recent-message window**. With the default `preserveRecentMessages: 6`, a short
-session can therefore run `/compact` without contacting LM Studio; this is expected
-upstream fast-JEV behavior, not a failed hook.
+With the default `preserveRecentMessages: 6`, a short session can run `/compact`
+without sending anything to LM Studio. This is expected.
 
-Each compaction ends in one `compaction outcome` line. `outcome: override` means the plugin
-replaced OpenCode's summary; anything else fell back to normal compaction.
-
-| `reason` | Meaning |
-| --- | --- |
-| `no-eligible-completed-tool-calls` | Nothing outside the pinned window; no request was needed |
-| `server-error-envelope` | The endpoint answered a 2xx with an error; usually a missing `/v1` in `localBaseUrl` |
-| `http-request-failed` | The server refused; read `server` for its own message |
-| `endpoint-unreachable` | Nothing is listening at `localBaseUrl` |
-| `context-overflow` | The prompt exceeded the model's context window |
-| `model-has-no-logprobs` | The model answered in `reasoning_content` and sent `logprobs: null`; it cannot drive the classifier, so `localModel` must change |
-| `invalid-classifier-response` | No `logprobs`/`top_logprobs` in the reply; the endpoint cannot serve this classifier |
-| `malformed-classifier-response` | The reply was not a chat completion at all |
-| `classifier-error` | Unclassified; the `server` field carries the message |
-
-For a deterministic LM Studio smoke test, temporarily make every completed call eligible and accept any reduction:
+For a deterministic smoke test:
 
 ```jsonc
 {
@@ -305,26 +432,71 @@ For a deterministic LM Studio smoke test, temporarily make every completed call 
 }
 ```
 
-Run at least one tool call to completion and then run `/compact`. The log should show
-`"candidates":1` (or more) and `"outcome":"override"`, while LM Studio receives the
-decision requests. Restore the normal preservation/reduction settings after the smoke
-test.
+Complete at least one tool call, then run `/compact`.
 
-The classifier needs `logprobs` with `top_logprobs`, because it reads the probability
-distribution over the option letters. A proxy in front of the model that injects `tools`
-or forces streaming will break it, and the server will say so:
+The log should show at least one candidate and classifier request.
 
-```text
-[WARN] [fast-jev-compaction-opencode] compaction outcome {"outcome":"fallback","reason":"http-request-failed","status":"400","server":"[400]: Engine protocol predict request returned 400: {\"error\":{\"code\":400,\"message\":\"logprobs is not supported with tools + stream\"}}"}
+</details>
+
+<details>
+<summary><strong>Local classifier falls back</strong></summary>
+
+Each compaction ends with a `compaction outcome` line.
+
+| Reason | Meaning |
+| --- | --- |
+| `no-eligible-completed-tool-calls` | Nothing outside the pinned window |
+| `server-error-envelope` | Endpoint returned an error envelope, sometimes with HTTP 2xx |
+| `http-request-failed` | Server rejected the request |
+| `endpoint-unreachable` | Nothing is listening at the configured endpoint |
+| `context-overflow` | Prompt exceeded the model's context |
+| `model-has-no-logprobs` | Model returned no usable probability distribution |
+| `invalid-classifier-response` | Missing `logprobs/top_logprobs` |
+| `malformed-classifier-response` | Response was not a valid chat completion |
+| `classifier-error` | Other classifier error; inspect the logged server diagnostic |
+
+A proxy must preserve `logprobs` and `top_logprobs` and must not rewrite the request
+into an incompatible tools/streaming form.
+
+</details>
+
+<details>
+<summary><strong>Invalid V2 TUI plugin module</strong></summary>
+
+This normally means OpenCode has cached an older V1 revision.
+
+```sh
+rm -rf "${XDG_CACHE_HOME:-$HOME/.cache}/opencode/packages/github:overbit/fast-jev-compaction-opencode"
+opencode plugin add github:overbit/fast-jev-compaction-opencode
 ```
 
-Point `localBaseUrl` straight at the model server in that case. The logged `server` text
-is the server's own diagnostic, length-capped and with the prompt scaffolding redacted;
-the rest of the response body is never written to the log.
+Restart OpenCode afterwards.
 
-If the Plugins UI reports `Invalid V2 TUI plugin module`, clear the cached package and reinstall; that error identifies an older V1 revision.
+</details>
 
-If installation fails with `NpmInstallFailedError`, verify GitHub access first. The package intentionally contains no npm/git preparation lifecycle scripts because OpenCode's git installer can fail on those before plugin loading.
+<details>
+<summary><strong>NpmInstallFailedError</strong></summary>
+
+Verify Git/GitHub access to the repository and clear stale package cache if needed.
+
+The package intentionally avoids npm lifecycle fields that trigger OpenCode's git
+dependency preparation path.
+
+</details>
+
+## Updating from the earlier V1 build
+
+Earlier revisions used `@opencode-ai/plugin`. OpenCode 2 requires the V2
+`@opencode/plugin` module shape.
+
+If upgrading from an old cached revision:
+
+```sh
+rm -rf "${XDG_CACHE_HOME:-$HOME/.cache}/opencode/packages/github:overbit/fast-jev-compaction-opencode"
+opencode plugin add github:overbit/fast-jev-compaction-opencode
+```
+
+Then restart OpenCode.
 
 ## Development
 
@@ -337,6 +509,17 @@ npm run compile
 
 Tests do not contact TypeSafe or LM Studio.
 
-## License and attribution
+## Credits
 
-MIT. See `NOTICE` for upstream attribution.
+This project is an OpenCode V2 port of
+[tamaratran/fast-jev-compaction](https://github.com/tamaratran/fast-jev-compaction).
+
+Local OpenAI-compatible classifier behavior was also informed by
+[lkntfnd/fast-jev-compaction-local](https://github.com/lkntfnd/fast-jev-compaction-local).
+
+Jev-Style local decision models and runtimes are maintained in
+[lawrence3699/jev-style](https://github.com/lawrence3699/jev-style).
+
+## License
+
+MIT. See [NOTICE](NOTICE) for upstream attribution.
