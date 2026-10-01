@@ -18,6 +18,10 @@ to the OpenCode V2 plugin API, with hosted JEV and a working local LM Studio bac
 > Status: experimental. The compaction strategy is intentionally conservative and falls
 > back to OpenCode's native compaction when classification fails or the reduction is too
 > small to justify an override.
+>
+> Supported today: hosted TypeSafe JEV and the LM Studio-compatible Jev-Style 2B v1
+> classifier. Jev-Style 0.8B v3 is documented below, but direct use of its scoring runtime
+> is not yet implemented by this plugin.
 
 ## Why this exists
 
@@ -151,7 +155,7 @@ Defaults:
 The local model must expose `logprobs` and `top_logprobs`. The plugin reads the
 probability distribution over the decision letters; generated prose alone is not enough.
 
-## Backend compatibility
+## Backend status
 
 | Backend | Model / runtime | Status | Notes |
 | --- | --- | --- | --- |
@@ -277,7 +281,7 @@ A proxy that authenticates can use a separate local bearer token:
 `localApiKey` is intentionally separate from the TypeSafe `apiKey`. The plugin never
 logs the credential itself.
 
-### Jev-Style 0.8B Decision v3
+### Jev-Style 0.8B Decision v3 — direct backend pending
 
 The newer
 [`chaoliangUNSW/Jev-Style-0.8B-Decision-v3-GGUF`](https://huggingface.co/chaoliangUNSW/Jev-Style-0.8B-Decision-v3-GGUF)
