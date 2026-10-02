@@ -29,7 +29,9 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "compile": "tsc"
+    "compile": "tsc",
+    "site:check": "node scripts/check-site.mjs",
+    "site:serve": "python3 -m http.server 4173 --directory site"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
