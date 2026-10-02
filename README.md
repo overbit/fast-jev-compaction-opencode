@@ -504,6 +504,31 @@ Then restart OpenCode.
 
 ## Development
 
+### GitHub Pages developer guide
+
+The dependency-free site lives in [`site/`](site/). Preview it locally:
+
+```sh
+npm run site:check
+npm run site:serve
+```
+
+Open `http://localhost:4173`. The illustrative retention review makes no model
+requests; backend instructions and copy buttons run entirely in the browser.
+Both backend instructions remain available when JavaScript is disabled.
+
+To publish, set **Settings → Pages → Build and deployment → Source** to
+**GitHub Actions**. The [`GitHub Pages` workflow](.github/workflows/pages.yml)
+validates changes on pull requests and deploys only `site/` on matching pushes
+to `main` or a manual run from `main`. No API key or custom deployment secret is
+needed. After enabling Pages, run the workflow once or push a site change.
+
+The default project URL is
+`https://overbit.github.io/fast-jev-compaction-opencode/`.
+All site assets use relative paths so the guide also works under a project URL
+in a fork. The self-hosted Geist fonts include their SIL Open Font License in
+`site/assets/OFL.txt`.
+
 ```sh
 npm install
 npm run typecheck
