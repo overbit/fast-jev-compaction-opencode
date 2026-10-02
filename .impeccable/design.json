@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-02T15:27:00Z",
+  "title": "Design System: fast-jev developer guide",
+  "extensions": {
+    "colorMeta": {
+      "primary": {"role":"primary","displayName":"Forest retention green","tonalRamp":["oklch(15% 0.04 150)","oklch(26% 0.06 150)","oklch(38% 0.09 150)","oklch(49% 0.12 150)","oklch(61% 0.12 150)","oklch(72% 0.1 150)","oklch(84% 0.06 150)","oklch(95% 0.02 150)"]},
+      "paper": {"role":"neutral","displayName":"White reading ground"},
+      "surface": {"role":"neutral","displayName":"Cool review surface"},
+      "ink": {"role":"neutral","displayName":"Charcoal body ink"},
+      "removed": {"role":"secondary","displayName":"Muted removal red"},
+      "truncated": {"role":"secondary","displayName":"Truncation amber"}
+    },
+    "typographyMeta": {
+      "display": {"displayName":"Review heading","purpose":"Plain-language introductory headings."},
+      "code": {"displayName":"Literal code","purpose":"Commands, paths, configuration, and transcript lines."}
+    },
+    "shadows": [
+      {"name":"review-lift","value":"0 12px 32px rgba(31,35,40,.05)","purpose":"Subtle separation of the transcript review."},
+      {"name":"status-lift","value":"0 5px 20px rgba(31,35,40,.15)","purpose":"Temporary clipboard feedback."}
+    ],
+    "motion": [{"name":"review-surface","value":"background-color .25s ease-out","purpose":"A restrained review-state change, disabled under reduced motion."}],
+    "breakpoints": [{"name":"compact-desktop","value":"1050px"},{"name":"single-column","value":"760px"}]
+  },
+  "components": [
+    {"name":"Primary action","kind":"button","refersTo":"button-primary","description":"Installation or repository action.","html":"<button class=\"ds-primary\">Install for OpenCode V2</button>","css":".ds-primary{background:var(--green,#176b3a);color:white;border:1px solid transparent;border-radius:var(--radius,6px);padding:13px 20px;font:600 14px Geist,Arial,sans-serif;cursor:pointer}.ds-primary:hover{background:var(--green-dark,#10512b)}.ds-primary:focus-visible{outline:3px solid var(--green,#176b3a);outline-offset:4px}"},
+    {"name":"Copy action","kind":"button","description":"Compact copy control in a code header.","html":"<button class=\"ds-copy\">Copy</button>","css":".ds-copy{background:white;color:var(--ink,#1f2328);border:1px solid var(--line,#d8dee4);border-radius:4px;padding:5px 10px;min-height:30px;font:12px Geist,Arial,sans-serif;cursor:pointer}.ds-copy:hover{color:var(--green,#176b3a);border-color:var(--green,#176b3a)}.ds-copy:focus-visible{outline:3px solid var(--green,#176b3a);outline-offset:4px}"},
+    {"name":"Retention row","kind":"custom","description":"Text and color communicate one retained tool result.","html":"<div class=\"ds-retained\"><span>03</span><div><strong>read(\"src/auth.ts\")</strong><p>Relevant implementation · verbatim</p></div><b>Keep</b></div>","css":".ds-retained{display:flex;align-items:center;gap:16px;padding:16px;background:var(--green-bg,#e9f6ed);color:var(--ink,#1f2328);font:12px ui-monospace,monospace}.ds-retained p{margin:6px 0 0;color:var(--muted,#59636e)}.ds-retained b{margin-left:auto;color:var(--green,#176b3a);font:600 12px Geist,Arial,sans-serif}"},
+    {"name":"Experimental status","kind":"chip","description":"Compact factual product-status label.","html":"<span class=\"ds-status\">Experimental</span>","css":".ds-status{display:inline-block;border:1px solid var(--line,#d8dee4);border-radius:3px;padding:2px 6px;color:var(--ink,#1f2328);font:600 12px Geist,Arial,sans-serif}"},
+    {"name":"Reference link","kind":"nav","description":"Quiet navigation to factual documentation.","html":"<a class=\"ds-link\" href=\"#reference\">Read the reference</a>","css":".ds-link{color:var(--ink,#1f2328);font:600 14px Geist,Arial,sans-serif;text-underline-offset:4px}.ds-link:hover{color:var(--green,#176b3a)}.ds-link:focus-visible{outline:3px solid var(--green,#176b3a);outline-offset:4px}"}
+  ],
+  "narrative": {
+    "northStar":"The Annotated Diff",
+    "overview":"A reference-first light interface rooted in familiar code review. Literal code, retained/removed rows, and quiet typography make retention visible without invented performance claims.",
+    "keyCharacteristics":["Cool neutral fields","Text-labeled retention states","Self-hosted workhorse type","Copyable configuration"],
+    "rules":[{"name":"The Labeled State Rule","body":"Never communicate retention by color alone.","section":"colors"},{"name":"The Code Is Code Rule","body":"Reserve monospace for literal code, data, and measurement.","section":"typography"},{"name":"The Reading Order Rule","body":"Stack narrow layouts in task order, keeping explanation before demonstration.","section":"layout"}],
+    "dos":["Preserve keyboard focus.","Wrap long commands.","Label synthetic examples."],
+    "donts":["Invent benchmark savings.","Replace reference content with promotional cards.","Hide backend instructions when JavaScript is unavailable."]
+  }
+}
