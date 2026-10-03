@@ -3,12 +3,34 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="JEV-guided context compaction for OpenCode V2. Classify old tool history, preserve retained text, and fall back safely. Hosted or local.">
+  <meta name="description" content="OpenCode V2 context compression plugin using JEV-guided context compaction and tool-output pruning. Keep useful history and preserve retained text.">
   <meta name="theme-color" content="#f6f8fa">
-  <title>fast-jev · Context compaction for OpenCode V2</title>
+  <link rel="canonical" href="https://overbit.github.io/fast-jev-compaction-opencode/">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="OpenCode Context Compression & Compaction Plugin | fast-jev">
+  <meta property="og:description" content="JEV-guided OpenCode context compaction that prunes stale tool history instead of rewriting retained conversation text.">
+  <meta property="og:url" content="https://overbit.github.io/fast-jev-compaction-opencode/">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="OpenCode Context Compression & Compaction Plugin | fast-jev">
+  <meta name="twitter:description" content="Prune stale OpenCode tool history with JEV-guided context compaction while preserving retained text.">
+  <title>OpenCode Context Compression & Compaction Plugin | fast-jev</title>
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="preload" href="assets/geist-semibold.ttf" as="font" type="font/ttf" crossorigin>
   <link rel="stylesheet" href="styles.css">
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareSourceCode",
+      "name": "fast-jev-compaction-opencode",
+      "description": "OpenCode V2 context compression and compaction plugin that prunes stale tool calls with JEV decision models instead of rewriting retained conversation text.",
+      "url": "https://overbit.github.io/fast-jev-compaction-opencode/",
+      "codeRepository": "https://github.com/overbit/fast-jev-compaction-opencode",
+      "programmingLanguage": "TypeScript",
+      "runtimePlatform": "OpenCode V2",
+      "license": "https://opensource.org/license/mit",
+      "keywords": "OpenCode, context compression, context compaction, context pruning, /compact, coding agent, JEV"
+    }
+  </script>
   <script src="main.js" defer></script>
 </head>
 <body>
@@ -20,9 +42,9 @@
   <main id="main">
     <section class="hero wrap" aria-labelledby="hero-title">
       <div class="hero-copy">
-        <h1 id="hero-title">Keep the context.<br>Not the clutter.</h1>
-        <p class="lead">Context compaction that makes decisions,<br class="desktop-break"> not new summaries.</p>
-        <p>JEV classifies old tool calls and results. Useful history stays in its own words; what can be re-read or re-run can go.</p>
+        <h1 id="hero-title">OpenCode context compaction.<br>Keep context, not clutter.</h1>
+        <p class="lead">JEV-guided context compression that makes decisions,<br class="desktop-break"> not new summaries.</p>
+        <p>When OpenCode compacts a session, JEV classifies old tool calls and results for context pruning. Useful history stays in its own words; what can be re-read or re-run can go.</p>
         <div class="hero-actions"><a class="button primary" href="#quick-start">Install for OpenCode V2<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M4 10h12m-5-5 5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></a><a class="text-link" href="https://github.com/overbit/fast-jev-compaction-opencode#configuration">Read the reference</a></div>
         <div class="install-line"><code id="install-command">opencode plugin add github:overbit/fast-jev-compaction-opencode</code><button class="copy-button" type="button" data-copy="install-command" aria-label="Copy installation command"><svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><rect x="7" y="7" width="9" height="10" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M4 13H3V3h9v1" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button></div>
         <p class="status-note"><span class="status-label">Experimental</span> Conservative by default. Native compaction remains the fallback.</p>
@@ -70,7 +92,7 @@
 
     <section class="section wrap reference" aria-labelledby="reference-title"><div class="reference-copy"><h2 id="reference-title">Conservative settings.<br>Explicit limits.</h2><p>The plugin supplies a deterministic checkpoint string through OpenCode V2’s compaction hook. Retained text is not model-rewritten, but the original message structure is flattened.</p><p>This is an experimental port, not an arbitrary replacement-message API.</p><a class="text-link" href="https://github.com/overbit/fast-jev-compaction-opencode#configuration">Explore all configuration options <span aria-hidden="true">↗</span></a></div><dl class="defaults"><div><dt>Recent messages pinned</dt><dd>6 <code>preserveRecentMessages</code></dd></div><div><dt>Keep threshold</dt><dd>0.5 <code>keepThreshold</code></dd></div><div><dt>Minimum reduction</dt><dd>25% <code>minReductionRatio</code></dd></div><div><dt>Truncated result head</dt><dd>300 chars <code>truncateHeadChars</code></dd></div></dl></section>
 
-    <section class="wrap troubleshooting" aria-labelledby="troubleshooting-title"><h2 id="troubleshooting-title">When something doesn’t compact.</h2><details><summary>No request reaches the local model</summary><p>A classification request needs at least one completed tool call outside the pinned recent-message window. Short sessions may correctly send no request. Check the diagnostic log for candidate counts before changing your configuration.</p></details><details><summary>The local classifier falls back</summary><p>Check that the endpoint is reachable, the loaded context is large enough, and the model exposes <code>logprobs</code> and <code>top_logprobs</code>. Every compaction writes an outcome reason to <code>~/.local/share/opencode/log/fast-jev-compaction.log</code>.</p><a href="https://github.com/overbit/fast-jev-compaction-opencode#troubleshooting">See diagnostic reasons and smoke-test configuration</a></details><details><summary>Can I use the smaller 0.8B v3 model?</summary><p>Not through this plugin’s current local adapter. The v3 model needs its dedicated scoring runtime / System One-compatible API, which is not directly wired into this plugin yet.</p><a href="https://github.com/overbit/fast-jev-compaction-opencode#local-models">Read the model compatibility notes</a></details></section>
+    <section class="wrap troubleshooting" aria-labelledby="troubleshooting-title"><h2 id="troubleshooting-title">OpenCode /compact troubleshooting.</h2><details><summary>No request reaches the local model</summary><p>A classification request needs at least one completed tool call outside the pinned recent-message window. Short sessions may correctly send no request. Check the diagnostic log for candidate counts before changing your configuration.</p></details><details><summary>The local classifier falls back</summary><p>Check that the endpoint is reachable, the loaded context is large enough, and the model exposes <code>logprobs</code> and <code>top_logprobs</code>. Every compaction writes an outcome reason to <code>~/.local/share/opencode/log/fast-jev-compaction.log</code>.</p><a href="https://github.com/overbit/fast-jev-compaction-opencode#troubleshooting">See diagnostic reasons and smoke-test configuration</a></details><details><summary>Can I use the smaller 0.8B v3 model?</summary><p>Not through this plugin’s current local adapter. The v3 model needs its dedicated scoring runtime / System One-compatible API, which is not directly wired into this plugin yet.</p><a href="https://github.com/overbit/fast-jev-compaction-opencode#local-models">Read the model compatibility notes</a></details></section>
     <section class="closing wrap"><h2>Keep what matters.<br>Inspect how it works.</h2><a class="button primary" href="https://github.com/overbit/fast-jev-compaction-opencode">Explore the source<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M5 15 15 5M5 5h10v10" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></a></section>
   </main>
   <footer class="footer wrap"><div><strong>fast-jev-compaction-opencode</strong><p>An OpenCode V2 port of <a href="https://github.com/tamaratran/fast-jev-compaction">fast-jev-compaction</a>.<br>Local integration informed by <a href="https://github.com/lkntfnd/fast-jev-compaction-local">fast-jev-compaction-local</a>.</p></div><div class="footer-links"><a href="https://github.com/overbit/fast-jev-compaction-opencode/blob/main/LICENSE">MIT license</a><a href="https://github.com/overbit/fast-jev-compaction-opencode/blob/main/NOTICE">Attribution</a><a href="https://github.com/overbit/fast-jev-compaction-opencode/issues">Report an issue</a></div></footer>
