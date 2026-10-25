@@ -71,10 +71,12 @@
     "options": {
       "backend": "systemone",
       "localBaseUrl": "http://127.0.0.1:11434/v1",
-      "localModel": "tev1:0.8b"
+      "localModel": "tev1:0.8b",
+      "maxStateTokens": 1200,
+      "maxRequestTokens": 1800
     }
   }]
-}</code></pre></div><p class="compatibility-note">Native System One scores multiple retention questions per request. For older chat-only models, the legacy <code>backend: "local"</code> still supports <code>top_logprobs</code>.</p></div>
+}</code></pre></div><p class="fine-print">Tev1 0.8B is designed for short inputs; use smaller state/request limits as shown. Larger models may support more context.</p><p class="compatibility-note">Native System One scores multiple retention questions per request. For older chat-only models, the legacy <code>backend: "local"</code> still supports <code>top_logprobs</code>.</p></div>
       </div></div>
     </div></section>
 

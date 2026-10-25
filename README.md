@@ -168,15 +168,20 @@ ollama pull tev1:0.8b
     "options": {
       "backend": "systemone",
       "localBaseUrl": "http://127.0.0.1:11434/v1",
-      "localModel": "tev1:0.8b"
+      "localModel": "tev1:0.8b",
+      "maxStateTokens": 1200,
+      "maxRequestTokens": 1800
     }
   }]
 }
 ```
 
-This calls `http://127.0.0.1:11434/v1/systemone`. No TypeSafe API key is required
-for either local setup. See [Local models](#local-models) for the legacy
-`backend: "local"` chat-completions path and additional server options.
+This calls `http://127.0.0.1:11434/v1/systemone`. The `tev1:0.8b` model is tuned
+for short inputs (about 2,000 tokens of context), so this example deliberately uses
+smaller state/request ceilings than the general System One defaults. Larger decision
+models can use larger budgets. No TypeSafe API key is required for either local setup.
+See [Local models](#local-models) for the legacy `backend: "local"` chat-completions
+path and additional server options.
 
 ## Backend status
 
@@ -248,6 +253,8 @@ state. The plugin defaults to `maxStateTokens: 8000` and
 loaded model supports more context.
 
 A small decision model may have a shorter context window than the request limit.
+For example, [Ollama's Tev1 0.8B model](https://ollama.com/library/tev1)
+recommends short requests, so the quick start limits its state to 1,200 tokens.
 If the server rejects a long state, lower `maxStateTokens` and
 `maxRequestTokens`. An optional `localApiKey` sends
 `Authorization: Bearer <token>` to an authenticated local endpoint or proxy.
