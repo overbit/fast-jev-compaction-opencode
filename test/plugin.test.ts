@@ -240,6 +240,31 @@ describe('OpenCode V2 adapter', () => {
     expect(log).toContain('"outcome":"override"');
   });
 
+  it('falls back without contacting the server when System One has no model ID', async () => {
+    vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    const logDirectory = mkdtempSync(join(tmpdir(), 'fast-jev-systemone-test-'));
+    temporaryDirectories.push(logDirectory);
+    const logFile = join(logDirectory, 'plugin.log');
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    let hook: ((event: Record<string, unknown>) => Promise<void>) | undefined;
+    await FastJevCompaction.setup({
+      options: { backend: 'systemone', preserveRecentMessages: 0, logFile },
+      session: {
+        async hook(name: string, callback: (event: Record<string, unknown>) => Promise<void>) {
+          if (name === 'compaction') hook = callback;
+          return { dispose: async () => undefined };
+        },
+      },
+    } as never);
+
+    const event: Record<string, unknown> = { sessionID: 'ses_missing_model', messages };
+    await hook!(event);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(event.result).toBeUndefined();
+    expect(readFileSync(logFile, 'utf8')).toContain('"reason":"missing-local-model"');
+  });
+
   it('logs when no completed tool call is eligible without contacting the local backend', async () => {
     vi.spyOn(console, 'info').mockImplementation(() => undefined);
     const logDirectory = mkdtempSync(join(tmpdir(), 'fast-jev-plugin-test-'));

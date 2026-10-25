@@ -99,7 +99,10 @@ describe('System One local client', () => {
     }
   });
 
-  it('requires an explicit decision model ID', () => {
-    expect(() => new SystemOneClient({ model: '' })).toThrow(/localModel/);
+  it('defers missing-model errors until classification so OpenCode can fall back', async () => {
+    const fetcher = vi.fn();
+    const client = new SystemOneClient({ model: '', fetch: fetcher });
+    await expect(client.ask(state, questions)).rejects.toThrow(/requires localModel/);
+    expect(fetcher).not.toHaveBeenCalled();
   });
 });

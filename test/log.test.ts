@@ -98,6 +98,13 @@ describe('file logger', () => {
     });
   });
 
+  it('identifies missing local decision model configuration', () => {
+    expect(errorSummary(new Error('backend=systemone requires localModel'))).toEqual({
+      errorName: 'Error',
+      reason: 'missing-local-model',
+    });
+  });
+
   it('classifies a 200 error envelope as a refusal rather than a failed request', () => {
     const summary = errorSummary(
       new Error('local classifier got an error envelope (200) server: Unexpected endpoint or method.'),

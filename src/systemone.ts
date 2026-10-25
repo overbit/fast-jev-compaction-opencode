@@ -82,8 +82,7 @@ export class SystemOneClient implements JevAsker {
   private readonly maxQuestions: number;
 
   constructor(options: SystemOneClientOptions) {
-    if (!options.model.trim()) throw new Error('backend=systemone requires localModel');
-    this.model = options.model;
+    this.model = options.model.trim();
     this.url = systemOneEndpoint(options.baseUrl);
     this.apiKey = options.apiKey;
     this.fetcher = options.fetch ?? fetch;
@@ -92,6 +91,7 @@ export class SystemOneClient implements JevAsker {
   }
 
   async ask(state: JevState, questions: JevQuestions): Promise<JevResponse> {
+    if (!this.model) throw new Error('backend=systemone requires localModel');
     const batches = systemOneBatches(
       this.model,
       state,
