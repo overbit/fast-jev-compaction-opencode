@@ -107,6 +107,7 @@ export function errorSummary(error: unknown): Record<string, string> {
   if (httpStatus) {
     return withServer({ errorName: name, reason: 'http-request-failed', status: httpStatus });
   }
+  if (/requires localModel/i.test(message)) return { errorName: name, reason: 'missing-local-model' };
   if (/unreachable at /i.test(message)) return { errorName: name, reason: 'endpoint-unreachable' };
   if (/context overflow/i.test(message)) return { errorName: name, reason: 'context-overflow' };
   // A `logprobs: null` model needs a different fix from a broken endpoint, so

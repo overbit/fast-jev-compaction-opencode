@@ -5,9 +5,10 @@ import { compact, reductionRatio, resolveOptions } from './compact.js';
 import { LOCAL_BASE_URL, LOCAL_MODEL, LocalJevAsker } from './local.js';
 import { createLogger, defaultLogPath, errorSummary, safeUrl, type Logger } from './log.js';
 import { collectToolCalls } from './state.js';
+import { LOCAL_SYSTEM_ONE_BASE_URL, SystemOneClient, systemOneEndpoint } from './systemone.js';
 import type { CompactOptions, CompactResult, JevAsker, Message } from './types.js';
 
-type Backend = 'typesafe' | 'local';
+type Backend = 'typesafe' | 'local' | 'systemone';
 type PluginOptions = Record<string, unknown>;
 
 type NativeTextPart = {
@@ -81,13 +82,19 @@ function numberOption(options: PluginOptions, key: string, fallback: number): nu
 }
 
 export function resolveConfig(options: PluginOptions = {}): FastJevConfig {
-  const backend = options.backend === 'local' ? 'local' : 'typesafe';
+  const backend = options.backend === 'systemone' ? 'systemone' : options.backend === 'local' ? 'local' : 'typesafe';
   const config: FastJevConfig = {
     backend,
     localConcurrency: Math.max(1, Math.floor(numberOption(options, 'localConcurrency', DEFAULTS.localConcurrency))),
     localContextTokens: Math.max(1, numberOption(options, 'localContextTokens', DEFAULTS.localContextTokens)),
     minReductionRatio: Math.max(0, Math.min(1, numberOption(options, 'minReductionRatio', DEFAULTS.minReductionRatio))),
   };
+
+  // Smaller default state avoids exceeding Ollama's 64 KiB text/schema limit.
+  if (backend === 'systemone') {
+    config.maxStateTokens = 8_000;
+    config.maxRequestTokens = 10_000;
+  }
 
   for (const key of [
     'keepThreshold',
@@ -258,6 +265,37 @@ function partCensus(messages: readonly NativeMessage[]): {
 }
 
 function createAsker(config: FastJevConfig, logger: Logger): JevAsker {
+  if (config.backend === 'systemone') {
+    return new SystemOneClient({
+      baseUrl: config.localBaseUrl,
+      model: config.localModel ?? '',
+      apiKey: config.localApiKey,
+      fetch: async (url, init) => {
+        const started = Date.now();
+        logger.info('classifier request', {
+          method: init?.method ?? 'POST',
+          url: safeUrl(String(url)),
+        });
+        try {
+          const response = await fetch(url, init);
+          logger.info('classifier response', {
+            status: response.status,
+            ok: response.ok,
+            durationMs: Date.now() - started,
+          });
+          return response;
+        } catch (error) {
+          logger.warn('classifier transport error', {
+            durationMs: Date.now() - started,
+            ...errorSummary(error),
+          });
+          throw new Error(
+            `local System One unreachable at ${String(url)}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      },
+    });
+  }
   if (config.backend === 'local') {
     return new LocalJevAsker({
       baseUrl: config.localBaseUrl,
@@ -332,10 +370,14 @@ export const FastJevCompaction = Plugin.define({
     const logger = createLogger(logFile);
     const asker = createAsker(config, logger);
     const backendDetails =
-      config.backend === 'local'
+      config.backend === 'local' || config.backend === 'systemone'
         ? {
-            endpoint: safeUrl(config.localBaseUrl ?? LOCAL_BASE_URL),
-            model: config.localModel ?? LOCAL_MODEL,
+            endpoint: safeUrl(
+              config.backend === 'systemone'
+                ? systemOneEndpoint(config.localBaseUrl ?? LOCAL_SYSTEM_ONE_BASE_URL)
+                : (config.localBaseUrl ?? LOCAL_BASE_URL),
+            ),
+            model: config.localModel ?? (config.backend === 'systemone' ? '[required]' : LOCAL_MODEL),
             // Whether a bearer token is sent, never the token itself.
             apiKey: config.localApiKey ? 'set' : 'none',
           }
