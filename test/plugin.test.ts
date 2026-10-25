@@ -29,6 +29,16 @@ describe('resolveConfig', () => {
     expect(config.logFile).toBe('/tmp/jev.log');
   });
 
+  it('selects System One and applies conservative local request defaults', () => {
+    const config = resolveConfig({ backend: 'systemone', localModel: 'tev1:0.8b' });
+    expect(config.backend).toBe('systemone');
+    expect(config.maxStateTokens).toBe(8_000);
+    expect(config.maxRequestTokens).toBe(10_000);
+    expect(resolveConfig({
+      backend: 'systemone', maxStateTokens: 4000, maxRequestTokens: 5000,
+    }).maxStateTokens).toBe(4000);
+  });
+
   it('carries a local bearer token without conflating it with the TypeSafe key', () => {
     const config = resolveConfig({ backend: 'local', localApiKey: 'sk-proxy', apiKey: 'sk-typesafe' });
     expect(config.localApiKey).toBe('sk-proxy');
@@ -169,6 +179,65 @@ describe('OpenCode V2 adapter', () => {
     expect(log).toContain('"outcome":"override"');
     expect(log).not.toContain('Fix the test');
     expect(log).not.toContain('long output');
+  });
+
+  it('uses one System One request for both compaction questions', async () => {
+    vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    const logDirectory = mkdtempSync(join(tmpdir(), 'fast-jev-systemone-test-'));
+    temporaryDirectories.push(logDirectory);
+    const logFile = join(logDirectory, 'plugin.log');
+    const fetchMock = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) =>
+      new Response(JSON.stringify({
+        answers: {
+          call_t1: { type: 'noul', noul: 0.1 },
+          result_t1: { type: 'noul', noul: 0.1 },
+        },
+      })),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    let hook: ((event: Record<string, unknown>) => Promise<void>) | undefined;
+    await FastJevCompaction.setup({
+      options: {
+        backend: 'systemone',
+        localBaseUrl: 'http://127.0.0.1:11434/v1',
+        localModel: 'tev1:0.8b',
+        localApiKey: 'sk-proxy-only',
+        preserveRecentMessages: 0,
+        minReductionRatio: 0,
+        logFile,
+      },
+      session: {
+        async hook(name: string, callback: (event: Record<string, unknown>) => Promise<void>) {
+          if (name === 'compaction') hook = callback;
+          return { dispose: async () => undefined };
+        },
+      },
+    } as never);
+
+    const event: Record<string, unknown> = { sessionID: 'ses_systemone', messages };
+    await hook!(event);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe('http://127.0.0.1:11434/v1/systemone');
+    expect((init?.headers as Record<string, string>).authorization).toBe('Bearer sk-proxy-only');
+    const body = JSON.parse(String(init?.body));
+    expect(body.model).toBe('tev1:0.8b');
+    expect(Object.keys(body.questions)).toEqual(['call_t1', 'result_t1']);
+    expect(body.state.history).toBeInstanceOf(Array);
+    expect(event.result).toMatchObject({
+      metadata: {
+        backend: 'systemone',
+        candidateCalls: 1,
+        callsDropped: 1,
+        jevBatches: 1,
+      },
+    });
+    const log = readFileSync(logFile, 'utf8');
+    expect(log).toContain('"backend":"systemone"');
+    expect(log).toContain('"model":"tev1:0.8b"');
+    expect(log).not.toContain('sk-proxy-only');
+    expect(log).not.toContain('Fix the test');
+    expect(log).toContain('"outcome":"override"');
   });
 
   it('logs when no completed tool call is eligible without contacting the local backend', async () => {
