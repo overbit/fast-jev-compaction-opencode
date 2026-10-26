@@ -1,10 +1,14 @@
-# fast-jev-compaction-opencode
+# fast-jev-compaction-opencode — OpenCode context compression and compaction
 
 [![CI](https://github.com/overbit/fast-jev-compaction-opencode/actions/workflows/ci.yml/badge.svg)](https://github.com/overbit/fast-jev-compaction-opencode/actions/workflows/ci.yml)
 [![OpenCode](https://img.shields.io/badge/OpenCode-v2-111827)](https://opencode.ai/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**JEV-guided context compaction for OpenCode V2.**
+**JEV-guided context compression and context compaction for OpenCode V2.**
+
+It plugs into OpenCode's compaction flow—the context-management path behind `/compact`
+and `/summarize`—and selectively prunes stale completed tool calls and results when
+compaction runs.
 
 Instead of asking a generative model to rewrite old conversation history into a summary,
 this plugin asks a decision model which completed tool calls and outputs are still useful.
@@ -23,6 +27,18 @@ for LM Studio and Ollama. The legacy LM Studio chat adapter remains available.
 > Supported today: hosted TypeSafe JEV, native local System One (LM Studio 0.4.26+,
 > Ollama 0.35+, or another compatible server), and the legacy LM Studio
 > `/chat/completions + top_logprobs` adapter.
+
+## OpenCode context compression without a rewritten summary
+
+OpenCode calls its built-in context-shortening process **compaction**. It can run
+automatically near the model's context limit or manually through `/compact` (alias
+`/summarize`). This plugin addresses the same context-management problem with selective
+**context pruning**: completed tool calls can be kept, truncated, or dropped based on JEV
+decisions, while retained text stays verbatim.
+
+That makes the project relevant when searching for an OpenCode context compression plugin,
+OpenCode context compaction, `/compact` tooling, tool-output pruning, or coding-agent
+context-window management.
 
 ## Why this exists
 

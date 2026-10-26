@@ -1,7 +1,7 @@
 {
   "name": "fast-jev-compaction-opencode",
   "version": "0.2.0",
-  "description": "JEV-guided context compaction for OpenCode V2: prune stale tool history with hosted or local decision models instead of rewriting conversations with an LLM.",
+  "description": "OpenCode V2 context compression and compaction plugin that prunes stale tool calls with JEV decision models instead of rewriting conversation history.",
   "type": "module",
   "license": "MIT",
   "main": "./src/index.ts",
@@ -43,5 +43,19 @@
   },
   "engines": {
     "opencode": ">=2.0.0 <3"
-  }
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "context-compaction",
+    "context-compression",
+    "context-pruning",
+    "context-window",
+    "compact",
+    "summarize",
+    "coding-agent",
+    "llm",
+    "jev",
+    "typescript"
+  ]
 }
