@@ -12,7 +12,9 @@ describe("GitHub Pages site", () => {
     const html = readFileSync("site/index.html", "utf8")
     expect(html).toMatch(/id="hosted-panel" class="backend-panel">/)
     expect(html).toMatch(/id="local-panel" class="backend-panel">/)
-    expect(html).toContain("not directly supported")
+    expect(html).toContain('id="ollama-config"')
+    expect(html).toContain('"backend": "systemone"')
+    expect(html).toContain("tev1:0.8b")
     expect(html).toContain("Illustrative example")
   })
 

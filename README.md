@@ -17,15 +17,16 @@ this plugin asks a decision model which completed tool calls and outputs are sti
 
 This project ports the core approach from
 [tamaratran/fast-jev-compaction](https://github.com/tamaratran/fast-jev-compaction)
-to the OpenCode V2 plugin API, with hosted JEV and a working local LM Studio backend.
+to the OpenCode V2 plugin API, with hosted JEV and native local System One support
+for LM Studio and Ollama. The legacy LM Studio chat adapter remains available.
 
 > Status: experimental. The compaction strategy is intentionally conservative and falls
 > back to OpenCode's native compaction when classification fails or the reduction is too
 > small to justify an override.
 >
-> Supported today: hosted TypeSafe JEV and the LM Studio-compatible Jev-Style 2B v1
-> classifier. Jev-Style 0.8B v3 is documented below, but direct use of its scoring runtime
-> is not yet implemented by this plugin.
+> Supported today: hosted TypeSafe JEV, native local System One (LM Studio 0.4.26+,
+> Ollama 0.35+, or another compatible server), and the legacy LM Studio
+> `/chat/completions + top_logprobs` adapter.
 
 ## OpenCode context compression without a rewritten summary
 
@@ -57,7 +58,8 @@ fast-jev-compaction takes a narrower approach:
 - **protect recent work** — the newest messages are pinned by default;
 - **fail open** — classifier errors or weak reductions fall back to native OpenCode
   compaction;
-- **run hosted or local** — use TypeSafe JEV or an OpenAI-compatible local decision model.
+- **run hosted or local** — use TypeSafe JEV or local System One decision models via
+  LM Studio, Ollama, or a compatible server.
 
 The plugin is most useful for long, tool-heavy coding sessions. If a session contains few
 completed tool calls, there may be little or nothing for JEV to remove.
@@ -142,48 +144,73 @@ export TYPESAFE_API_KEY=...
 
 No plugin options are required.
 
-#### Local LM Studio — supported today
+#### Local System One — LM Studio (recommended)
 
-The working local backend uses an OpenAI-compatible
-`/chat/completions + top_logprobs` endpoint.
+LM Studio **0.4.26+** has a native `POST /v1/systemone` endpoint. Load a **decision
+model** such as [Jev-Style 0.8B v3 GGUF](https://huggingface.co/chaoliangUNSW/Jev-Style-0.8B-Decision-v3-GGUF)
+in LM Studio, start its server, and use the model identifier shown in LM Studio:
 
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugins": [
-    {
-      "package": "github:overbit/fast-jev-compaction-opencode",
-      "options": {
-        "backend": "local"
-      }
+  "plugins": [{
+    "package": "github:overbit/fast-jev-compaction-opencode",
+    "options": {
+      "backend": "systemone",
+      "localModel": "YOUR_LOADED_DECISION_MODEL_ID"
     }
-  ]
+  }]
 }
 ```
 
-Defaults:
+Default endpoint: `http://127.0.0.1:1234/v1/systemone`. Unlike the legacy adapter,
+System One accepts multiple JEV questions with **one shared state** per request. The
+model ID must be configured explicitly; the plugin does not automatically download or
+load model weights.
 
-- endpoint: `http://127.0.0.1:1234/v1`
-- model: `jev-style-qwen3.5-2b-decision-mlx`
-- concurrency: `2`
-- local context ceiling: `64000`
+#### Local System One — Ollama
 
-The local model must expose `logprobs` and `top_logprobs`. The plugin reads the
-probability distribution over the decision letters; generated prose alone is not enough.
+Ollama **0.35+** offers the same API. For a small starting model:
+
+```sh
+ollama pull tev1:0.8b
+```
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": [{
+    "package": "github:overbit/fast-jev-compaction-opencode",
+    "options": {
+      "backend": "systemone",
+      "localBaseUrl": "http://127.0.0.1:11434/v1",
+      "localModel": "tev1:0.8b",
+      "maxStateTokens": 1200,
+      "maxRequestTokens": 1800
+    }
+  }]
+}
+```
+
+This calls `http://127.0.0.1:11434/v1/systemone`. The `tev1:0.8b` model is tuned
+for short inputs (about 2,000 tokens of context), so this example deliberately uses
+smaller state/request ceilings than the general System One defaults. Larger decision
+models can use larger budgets. No TypeSafe API key is required for either local setup.
+See [Local models](#local-models) for the legacy `backend: "local"` chat-completions
+path and additional server options.
 
 ## Backend status
 
-| Backend | Model / runtime | Status | Notes |
+| Backend | Model / runtime | Status | API |
 | --- | --- | --- | --- |
-| TypeSafe | `jev-latest` | **Supported** | Default hosted backend |
-| LM Studio / OpenAI-compatible | Jev-Style Qwen3.5 2B v1 | **Supported** | Uses `/chat/completions + top_logprobs` |
-| Jev-Style runtime | 0.8B Decision v3 | **Not wired directly yet** | Requires the model's dedicated scoring runtime / System One-compatible API |
+| `typesafe` | TypeSafe `jev-latest` | Supported (default) | Hosted `/v1/systemone` |
+| `systemone` | LM Studio 0.4.26+ with a loaded decision model (e.g. Jev-Style 0.8B v3) | Supported | Local `/v1/systemone` |
+| `systemone` | Ollama 0.35+ with `tev1:0.8b` or another compatible decision model | Supported | Local `/v1/systemone` |
+| `local` | Legacy LM Studio-compatible Jev-Style Qwen3.5 2B v1 | Supported | `/v1/chat/completions + top_logprobs` |
 
-The newer
-[`chaoliangUNSW/Jev-Style-0.8B-Decision-v3-GGUF`](https://huggingface.co/chaoliangUNSW/Jev-Style-0.8B-Decision-v3-GGUF)
-is attractive for a future direct local backend because it is much smaller, but it does
-not expose its decision scores through ordinary LM Studio/Ollama/chat generation. See
-[Local models](#local-models).
+Native System One servers score typed answers directly; they do not require chat-generation
+`logprobs`. Both local backends use `localBaseUrl`, `localModel`, and optional
+`localApiKey` for a proxy; the TypeSafe API key is never forwarded to local servers.
 
 ## Design goals
 
@@ -226,9 +253,38 @@ Override it with `logFile`.
 
 ## Local models
 
-### Current supported local path: LM Studio + 2B v1
+### Native System One: LM Studio, Ollama, and compatible servers
 
-The implemented `backend: "local"` adapter sends one classification prompt per JEV
+Set `backend: "systemone"`, `localBaseUrl`, and the **required** `localModel`
+decision-model identifier. `localBaseUrl` accepts a server origin
+(`http://127.0.0.1:11434`), a `/v1` base URL, or a complete
+`/v1/systemone` endpoint. It defaults to LM Studio's `http://127.0.0.1:1234/v1`.
+
+The plugin sends one request containing the compact state and a batch of yes/no
+(`noul`) questions; responses are probabilities between 0 and 1. To respect
+Ollama's local limits, batches contain at most **64 questions** and stay under a
+conservative **60 KiB UTF-8 JSON** request size. Additional batches reuse the same
+state. The plugin defaults to `maxStateTokens: 8000` and
+`maxRequestTokens: 10000` in System One mode; both can be overridden if your
+loaded model supports more context.
+
+A small decision model may have a shorter context window than the request limit.
+For example, [Ollama's Tev1 0.8B model](https://ollama.com/library/tev1)
+recommends short requests, so the quick start limits its state to 1,200 tokens.
+If the server rejects a long state, lower `maxStateTokens` and
+`maxRequestTokens`. An optional `localApiKey` sends
+`Authorization: Bearer <token>` to an authenticated local endpoint or proxy.
+
+Official server documentation:
+
+- [LM Studio Jev-compatible System One endpoint](https://lmstudio.ai/docs/developer/jev-compat/systemone)
+- [LM Studio 0.4.26 changelog](https://lmstudio.ai/changelog/lmstudio/lmstudio-v0.4.26)
+- [Ollama decision models and System One](https://ollama.com/blog/ollama-now-supports-jev-style-decision-models)
+
+### Legacy chat-completions path: LM Studio + 2B v1
+
+The existing `backend: "local"` adapter remains supported for the older 2B v1
+model. Unlike `backend: "systemone"`, it sends one classification prompt per
 question to an OpenAI-compatible chat endpoint.
 
 The request is effectively:
@@ -297,7 +353,7 @@ A proxy that authenticates can use a separate local bearer token:
 `localApiKey` is intentionally separate from the TypeSafe `apiKey`. The plugin never
 logs the credential itself.
 
-### Jev-Style 0.8B Decision v3 — direct backend pending
+### Jev-Style 0.8B Decision v3 — supported via System One
 
 The newer
 [`chaoliangUNSW/Jev-Style-0.8B-Decision-v3-GGUF`](https://huggingface.co/chaoliangUNSW/Jev-Style-0.8B-Decision-v3-GGUF)
@@ -331,11 +387,12 @@ and any locally hosted coding model all need additional memory.
 
 v3 is not a normal chat classifier. Its decision scores come from dedicated verdict slots.
 
-Stock LM Studio, Ollama, normal llama.cpp chat generation, and `mlx_lm.generate` can
-load the weights, but ordinary generation does not expose the scores required by the v3
-model.
+Ordinary chat/text generation does not expose v3's verdict scores. Recent LM Studio
+(0.4.26+) and Ollama (0.35+) releases can instead expose the native
+`/v1/systemone` endpoint when running a compatible decision model. Configure the
+plugin with `backend: "systemone"` and the model identifier supplied by the server.
 
-Use the model author's runtime:
+The model author's own scoring server also exposes a compatible endpoint:
 
 ```sh
 # CPU / CUDA / Linux / Windows
@@ -353,9 +410,9 @@ That server exposes a System One-compatible endpoint, normally:
 http://127.0.0.1:8765/v1/systemone
 ```
 
-**The plugin does not yet have a direct local System One backend.** Do not point the
-current `backend: "local"` LM Studio adapter at the v3 model and expect correct
-classification.
+**Use `backend: "systemone"` for v3.** The legacy `backend: "local"` path still
+requires chat-completions `top_logprobs` and cannot score v3 correctly. Model support
+depends on the decision model actually loaded by the configured server.
 
 References:
 
@@ -407,19 +464,19 @@ current OpenCode V2 compaction hook can express.
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `backend` | `typesafe` | `typesafe` or `local` |
+| `backend` | `typesafe` | `typesafe`, `systemone` (native local API), or `local` (legacy chat) |
 | `apiKey` | `TYPESAFE_API_KEY` | TypeSafe API key |
 | `model` | `jev-latest` | TypeSafe JEV model |
 | `baseUrl` | TypeSafe System One | Remote TypeSafe endpoint |
-| `localBaseUrl` | `http://127.0.0.1:1234/v1` | OpenAI-compatible local endpoint |
-| `localModel` | `jev-style-qwen3.5-2b-decision-mlx` | Current LM Studio-compatible local model |
+| `localBaseUrl` | `http://127.0.0.1:1234/v1` | Local server base; System One accepts origin, `/v1`, or full `/v1/systemone` URL |
+| `localModel` | legacy: `jev-style-qwen3.5-2b-decision-mlx` | Required explicitly for `systemone`; decision model ID from your local server |
 | `localApiKey` | none | Optional bearer token for a proxied local endpoint |
-| `localConcurrency` | `2` | Parallel local decisions |
-| `localContextTokens` | `64000` | Local prompt safety ceiling; must not exceed the context loaded in the server |
+| `localConcurrency` | `2` | Parallel decisions for legacy `local` chat backend |
+| `localContextTokens` | `64000` | Legacy chat-backend safety ceiling; must not exceed loaded context |
 | `keepThreshold` | `0.5` | Minimum probability to retain a call/result |
 | `preserveRecentMessages` | `6` | Newest adapted messages that are always pinned |
-| `maxStateTokens` | `25000` | JEV state ceiling |
-| `maxRequestTokens` | `30000` | Remote request ceiling |
+| `maxStateTokens` | `25000` (`8000` System One) | Estimated JEV state ceiling |
+| `maxRequestTokens` | `30000` (`10000` System One) | Estimated core state + question budget |
 | `truncateHeadChars` | `300` | Characters retained when only a result is dropped |
 | `minReductionRatio` | `0.25` | Fall back to native compaction below this reduction |
 | `logFile` | OpenCode data log path | Override diagnostics file |
@@ -433,7 +490,7 @@ A request is only necessary when there is at least one **completed tool call out
 pinned recent-message window**.
 
 With the default `preserveRecentMessages: 6`, a short session can run `/compact`
-without sending anything to LM Studio. This is expected.
+without contacting the configured local model server. This is expected.
 
 For a deterministic smoke test:
 
@@ -552,7 +609,7 @@ npm test
 npm run compile
 ```
 
-Tests do not contact TypeSafe or LM Studio.
+Tests use mocked HTTP responses and do not contact TypeSafe, LM Studio, or Ollama.
 
 ## Credits
 
